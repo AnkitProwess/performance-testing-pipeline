@@ -15,7 +15,7 @@ resources:
   repositories:
     - repository: performance-testing-pipeline-template
       type: github
-      name: "amit21kv/performance-testing-pipeline" # Format: 'ProjectName/RepositoryName' if across different DevOps projects
+      name: "prowess-soft/poc-performance-testing-ado-pipeline" # Format: 'ProjectName/RepositoryName' if across different DevOps projects
       endpoint: "GitHubServiceConnection"   # Name of the Service Connection in Azure DevOps
       ref: refs/heads/main            # The default branch containing the templates
 

@@ -29,7 +29,7 @@ resources:
   repositories:
     - repository: performance-testing-pipeline-template
       type: git
-      name: performance-testing-pipeline # Points to itself
+      name: poc-performance-testing-ado-pipeline # Points to itself
 
 stages:
   - stage: PerformanceTesting
