@@ -1,0 +1,56 @@
+{
+    "apiName": "Employees Exp API",
+    "artifact_version": "1.0.105",
+    "stages": [
+        {
+            "duration": "10s",
+            "target": 15
+        },
+        {
+            "duration": "20s",
+            "target": 25
+        },
+        {
+            "duration": "10s",
+            "target": 1
+        }
+    ],
+    "thresholds": {
+        "http_req_failed": [
+            "rate<0.005"
+        ],
+        "http_req_duration": [
+            "p(90)<500",
+            "p(95)<1000",
+            "p(99)<2000"
+        ]
+    },
+    "endpoints": [
+        {
+            "endpoint": "https://omni-sb-n36oxw.5sc6y6-1.usa-e2.cloudhub.io/oauth-test/reflector",
+            "method": "GET",
+            "headers": {
+                "client_id": "fc7c5bb9c23f444cb2526dbd56314b20",
+                "client_secret": "75FdCFB19BD84167bF7c98A6F55A0Ee8"
+            },
+            "expectedStatus": 200,
+            "sleepDuration": 0.5
+        },
+        {
+            "endpoint": "https://mule-employees-xapi-v1d1-n36oxw.5sc6y6-4.usa-e2.cloudhub.io/api/token",
+            "method": "POST",
+            "headers": {
+				"content-type": "application/json",
+                "client_id": "fc7c5bb9c23f444cb2526dbd56314b20",
+                "client_secret": "75FdCFB19BD84167bF7c98A6F55A0Ee8"
+            },
+            "payload": {
+                "client_id": "abcd",
+                "client_secret": "xyz",
+                "grant_type": "client_credentials"
+            },
+            "expectedStatus": 200,
+            "sleepDuration": 0.5
+        }
+    ]
+}

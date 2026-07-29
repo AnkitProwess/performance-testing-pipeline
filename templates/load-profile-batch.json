@@ -1,0 +1,26 @@
+{
+  "apiName": "Parallel-Batch-StressTest",
+  "artifact_version": "1.0.0",
+  "stages": [
+    {
+      "duration": "5s",
+      "target": 2
+    },
+    {
+      "duration": "5s",
+      "target": 0
+    }
+  ],
+  "endpoints": [
+    {
+      "endpoint": "https://httpbin.org/get",
+      "method": "GET",
+      "batchGroup": "batch-1"
+    },
+    {
+      "endpoint": "https://httpbin.org/delay/1",
+      "method": "GET",
+      "batchGroup": "batch-1"
+    }
+  ]
+}

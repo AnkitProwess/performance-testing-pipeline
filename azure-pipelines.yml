@@ -1,0 +1,44 @@
+# azure-pipelines.yml
+# MASTER MANUAL RUNNER (Triggered manually or via webhook in the Master Repository)
+
+trigger: none # Manual run only
+
+parameters:
+  - name: apiRepoUrl
+    type: string
+    displayName: "Target API Git Repo URL"
+  - name: reportRecipient
+    type: string
+    displayName: "Email Report Recipient"
+    default: "team@company.com"
+  - name: apiName
+    type: string
+    displayName: "API Name (Subdirectory under repository)"
+    default: ""
+  - name: profileName
+    type: string
+    displayName: "Profile Name (JSON file name)"
+    default: "load-profile.json"
+  - name: debug
+    type: string
+    displayName: "Enable HTTP Debugging"
+    default: "false"
+
+# Define the repository resource for the master repo to support the template checkout
+resources:
+  repositories:
+    - repository: performance-testing-pipeline-template
+      type: git
+      name: performance-testing-pipeline # Points to itself
+
+stages:
+  - stage: PerformanceTesting
+    displayName: 'Execute API Performance Stress Testing'
+    jobs:
+      - template: k6-pipeline-job-template.yml
+        parameters:
+          apiRepoUrl: ${{ parameters.apiRepoUrl }}
+          reportRecipient: ${{ parameters.reportRecipient }}
+          apiName: ${{ parameters.apiName }}
+          profileName: ${{ parameters.profileName }}
+          debug: ${{ parameters.debug }}

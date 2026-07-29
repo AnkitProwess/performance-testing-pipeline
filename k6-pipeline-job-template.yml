@@ -1,0 +1,136 @@
+parameters:
+  - name: reportRecipient
+    type: string
+    default: 'amit21kv@gmail.com'
+  - name: apiRepoUrl
+    type: string
+    default: '' # Defaults to empty for imported CI/CD mode
+  - name: apiName
+    type: string
+    default: '' # Subdirectory name under the cloned repo where load-profile.json exists
+  - name: profileName
+    type: string
+    default: 'load-profile.json' # File name of the load profile configuration
+  - name: debug
+    type: string
+    default: 'false' # Enable k6 HTTP debugging
+
+jobs:
+  - job: RunPerformanceTests
+    displayName: 'Run k6 Performance Tests'
+    pool:
+      vmImage: 'ubuntu-latest'
+    
+    # 1. Reference the SMTP secret variable group
+    variables:
+      - group: email-testing-vg
+      - group: performance-testing-vg
+
+    steps:
+      # SCENARIO A: Dynamic Manual Run (triggered from master pipeline with an apiRepoUrl parameter)
+      - ${{ if ne(parameters.apiRepoUrl, '') }}:
+        - script: |
+            git clone ${{ parameters.apiRepoUrl }} $(Pipeline.Workspace)/s/api-repo
+          displayName: 'Fetch API Load Configuration (Dynamic Clone)'
+        
+        - checkout: self
+          path: s/master-pipeline-repo
+          displayName: 'Checkout Master Pipeline Tooling'
+
+      # SCENARIO B: Imported Template Run (called directly from target API repos)
+      - ${{ if eq(parameters.apiRepoUrl, '') }}:
+        - checkout: self
+          path: s/api-repo
+          displayName: 'Checkout API Repository (Self)'
+        
+        - checkout: performance-testing-pipeline-template
+          path: s/master-pipeline-repo
+          displayName: 'Checkout Master Pipeline Tooling'
+
+      # 2. Prepare the engine script by placing it in the API configuration workspace
+      - script: |
+          cp $(Pipeline.Workspace)/s/master-pipeline-repo/k6-engine-script.js $(Pipeline.Workspace)/s/api-repo/
+        displayName: 'Prepare Engine Script'
+
+      # 3. Run the containerized k6 stress test
+      - script: |
+          API_NAME="${{ parameters.apiName }}"
+          PROFILE_NAME="${{ parameters.profileName }}"
+          if [ -z "$PROFILE_NAME" ]; then
+            PROFILE_NAME="load-profile.json"
+          fi
+          
+          if [ -z "$API_NAME" ]; then
+            LOAD_PROFILE_PATH="/apps/$PROFILE_NAME"
+          else
+            LOAD_PROFILE_PATH="/apps/$API_NAME/$PROFILE_NAME"
+          fi
+          
+          # Check if debug mode is enabled (via parameter or variable group)
+          K6_ARGS=""
+          if [ "$DEBUG_PARAM" = "true" ] || [ "$DEBUG_ENV" = "true" ]; then
+            K6_ARGS="--http-debug=full"
+            echo "HTTP Debugging is enabled."
+          fi
+          
+          docker run --rm \
+            --user "$(id -u):$(id -g)" \
+            -v $(Pipeline.Workspace)/s/api-repo:/apps \
+            -e K6_WEB_DASHBOARD=true \
+            -e K6_WEB_DASHBOARD_EXPORT=/apps/report.html \
+            -e LOAD_PROFILE_PATH="$LOAD_PROFILE_PATH" \
+            grafana/k6 run $K6_ARGS /apps/k6-engine-script.js || true
+        displayName: 'Execute k6 Stress Test Container'
+        env:
+          DEBUG_PARAM: ${{ parameters.debug }}
+          DEBUG_ENV: $(DEBUG_LOGS)
+        continueOnError: true # Progress to email reporting even if SLAs or thresholds fail
+
+      # 4. Publish the HTML Dashboard Report to Build Artifacts
+      - task: PublishBuildArtifacts@1
+        inputs:
+          PathtoPublish: '$(Pipeline.Workspace)/s/api-repo/report.html'
+          ArtifactName: 'StressTestReport'
+          publishLocation: 'Container'
+        displayName: 'Archive Test Report HTML'
+
+      # 5. Execute the SMTP email delivery using the Python utility script
+      - script: |
+          # Resolve the load profile configuration file path on the agent host
+          API_NAME="${{ parameters.apiName }}"
+          PROFILE_NAME="${{ parameters.profileName }}"
+          if [ -z "$PROFILE_NAME" ]; then
+            PROFILE_NAME="load-profile.json"
+          fi
+          
+          if [ -z "$API_NAME" ]; then
+            HOST_PROFILE_PATH="$(Pipeline.Workspace)/s/api-repo/$PROFILE_NAME"
+          else
+            HOST_PROFILE_PATH="$(Pipeline.Workspace)/s/api-repo/$API_NAME/$PROFILE_NAME"
+          fi
+          
+          # Extract apiName and artifact_version from the JSON profile safely
+          if [ ! -f "$HOST_PROFILE_PATH" ]; then
+            API_NAME_VAL="Unknown-API"
+            ARTIFACT_VERSION_VAL="N/A"
+          else
+            API_NAME_VAL=$(jq -r '.apiName // "Unknown-API"' "$HOST_PROFILE_PATH")
+            ARTIFACT_VERSION_VAL=$(jq -r '.artifact_version // "N/A"' "$HOST_PROFILE_PATH")
+          fi
+          
+          echo "Sending report email for API: $API_NAME_VAL, Version: $ARTIFACT_VERSION_VAL"
+          
+          python $(Pipeline.Workspace)/s/master-pipeline-repo/send-email.py \
+            --to "${{ parameters.reportRecipient }}" \
+            --subject "Performance Test Report - $API_NAME_VAL - Version $ARTIFACT_VERSION_VAL" \
+            --report "$(Pipeline.Workspace)/s/api-repo/report.html" \
+            --build-url "$(System.TeamFoundationCollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId)"
+        displayName: 'Email Stress Test Report'
+        env:
+          SMTP_HOST: $(SMTP_HOST)
+          SMTP_PORT: $(SMTP_PORT)
+          SMTP_USER: $(SMTP_USER)
+          SMTP_PASSWORD: $(SMTP_PASS)
+          SMTP_FROM: $(SMTP_FROM)
+          SMTP_TLS: $(SMTP_TLS)
+          MANDATORY_RECIPIENTS: $(MANDATORY_RECIPIENTS)

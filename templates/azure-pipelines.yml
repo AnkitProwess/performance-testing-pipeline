@@ -1,0 +1,30 @@
+# azure-pipelines.yml
+# PLACE THIS IN YOUR API CODE REPOSITORY TO TRIGGER AUTOMATED PERFORMANCE TESTS
+
+# Triggers: Customize as needed. For example, manual runs or on main branch updates.
+trigger:
+  branches:
+    include:
+      - main
+  paths:
+    include:
+      - load-profile.json # Run whenever the load test profile configuration is modified
+
+# Declare the reference to the master performance testing template repository
+resources:
+  repositories:
+    - repository: performance-testing-pipeline-template
+      type: git
+      name: amit21kv/performance-testing-pipeline # Format: 'ProjectName/RepositoryName' if across different DevOps projects
+      endpoint: "GitHubServiceConnection"   # Name of the Service Connection in Azure DevOps
+      ref: refs/heads/main            # The default branch containing the templates
+
+stages:
+  - stage: PerformanceTesting
+    displayName: 'Execute API Performance Stress Testing'
+    jobs:
+      # Call the master reusable Job Template
+      - template: k6-pipeline-job-template.yml@performance-testing-pipeline-template
+        parameters:
+          apiName: mule-employees-xapi      # the directory name in Git repo where the load-profile.json file resides 
+          reportRecipient: 'api-team-alerts@company.com' # Target recipient for email reports
