@@ -7,10 +7,11 @@ parameters:
   - name: apiRepoUrl
     type: string
     displayName: "Target API Git Repo URL"
+    default: "https://github.com/AnkitProwess/sample-api.git"
   - name: reportRecipient
     type: string
     displayName: "Email Report Recipient"
-    default: "team@company.com"
+    default: "ankit.kumar@prowesssoft.com"
   - name: apiName
     type: string
     displayName: "API Name (Subdirectory under repository)"
@@ -23,13 +24,6 @@ parameters:
     type: string
     displayName: "Enable HTTP Debugging"
     default: "false"
-
-# Define the repository resource for the master repo to support the template checkout
-resources:
-  repositories:
-    - repository: performance-testing-pipeline-template
-      type: git
-      name: poc-performance-testing-ado-pipeline # Points to itself
 
 stages:
   - stage: PerformanceTesting

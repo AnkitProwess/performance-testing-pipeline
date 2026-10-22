@@ -1,7 +1,7 @@
 parameters:
   - name: reportRecipient
     type: string
-    default: 'amit21kv@gmail.com'
+    default: 'ankit.kumar@prowesssoft.com'
   - name: apiRepoUrl
     type: string
     default: '' # Defaults to empty for imported CI/CD mode
@@ -24,18 +24,28 @@ jobs:
     # 1. Reference the SMTP secret variable group
     variables:
       - group: email-testing-vg
-      - group: performance-testing-vg
+      - group: dev-test # client_id / client_secret for {{CLIENT_ID}} / {{CLIENT_SECRET}} in the profile; optional GITHUB_PAT for private API repos
 
     steps:
       # SCENARIO A: Dynamic Manual Run (triggered from master pipeline with an apiRepoUrl parameter)
       - ${{ if ne(parameters.apiRepoUrl, '') }}:
-        - script: |
-            git clone ${{ parameters.apiRepoUrl }} $(Pipeline.Workspace)/s/api-repo
-          displayName: 'Fetch API Load Configuration (Dynamic Clone)'
-        
+        # Checkout tooling first so the checkout step cannot clean the cloned API repo
         - checkout: self
           path: s/master-pipeline-repo
           displayName: 'Checkout Master Pipeline Tooling'
+
+        - script: |
+            # GITHUB_PAT is optional (only needed for private API repos)
+            # (an undefined ADO variable arrives as literal text starting with a dollar-paren)
+            if [ -n "$GIT_TOKEN" ] && [ "${GIT_TOKEN#\$(}" = "$GIT_TOKEN" ]; then
+              AUTH=$(printf 'x-access-token:%s' "$GIT_TOKEN" | base64 -w0)
+              git -c http.extraHeader="AUTHORIZATION: basic $AUTH" clone "${{ parameters.apiRepoUrl }}" "$(Pipeline.Workspace)/s/api-repo"
+            else
+              git clone "${{ parameters.apiRepoUrl }}" "$(Pipeline.Workspace)/s/api-repo"
+            fi
+          displayName: 'Fetch API Load Configuration (Dynamic Clone)'
+          env:
+            GIT_TOKEN: $(GITHUB_PAT)
 
       # SCENARIO B: Imported Template Run (called directly from target API repos)
       - ${{ if eq(parameters.apiRepoUrl, '') }}:
@@ -68,7 +78,7 @@ jobs:
           
           # Check if debug mode is enabled (via parameter or variable group)
           K6_ARGS=""
-          if [ "$DEBUG_PARAM" = "true" ] || [ "$DEBUG_ENV" = "true" ]; then
+          if [ "$DEBUG_PARAM" = "true" ]; then
             K6_ARGS="--http-debug=full"
             echo "HTTP Debugging is enabled."
           fi
@@ -79,11 +89,14 @@ jobs:
             -e K6_WEB_DASHBOARD=true \
             -e K6_WEB_DASHBOARD_EXPORT=/apps/report.html \
             -e LOAD_PROFILE_PATH="$LOAD_PROFILE_PATH" \
+            -e CLIENT_ID \
+            -e CLIENT_SECRET \
             grafana/k6 run $K6_ARGS /apps/k6-engine-script.js || true
         displayName: 'Execute k6 Stress Test Container'
         env:
           DEBUG_PARAM: ${{ parameters.debug }}
-          DEBUG_ENV: $(DEBUG_LOGS)
+          CLIENT_ID: $(client_id)
+          CLIENT_SECRET: $(client_secret)
         continueOnError: true # Progress to email reporting even if SLAs or thresholds fail
 
       # 4. Publish the HTML Dashboard Report to Build Artifacts

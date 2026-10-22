@@ -3,7 +3,11 @@ import { check, sleep } from 'k6';
 
 // Read configuration
 const loadProfilePath = __ENV.LOAD_PROFILE_PATH || './load-profile.json';
-const config = JSON.parse(open(loadProfilePath));
+// Replace {{VAR_NAME}} tokens in the profile with environment values (e.g. secrets from the Azure variable group)
+const rawProfile = open(loadProfilePath).replace(/\{\{(\w+)\}\}/g, (match, name) =>
+    __ENV[name] !== undefined ? __ENV[name] : match
+);
+const config = JSON.parse(rawProfile);
 
 const defaultThresholds = {
     http_req_failed: ['rate<0.01'],
