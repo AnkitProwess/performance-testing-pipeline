@@ -82,8 +82,8 @@ if __name__ == '__main__':
     # Process and merge recipient list (Developer requested + Mandatory ones)
     developer_to = args.to
     mandatory_to = os.environ.get("MANDATORY_RECIPIENTS", "").strip()
-    if not mandatory_to or mandatory_to == "$(MANDATORY_RECIPIENTS)":
-        mandatory_to = "qa-leads@company.com"
+    if mandatory_to == "$(MANDATORY_RECIPIENTS)":
+        mandatory_to = ""  # variable not defined in the variable group -> no mandatory recipients
     
     recipient_list = []
     if developer_to:

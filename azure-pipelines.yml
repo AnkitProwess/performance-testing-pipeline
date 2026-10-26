@@ -19,7 +19,7 @@ parameters:
   - name: profileName
     type: string
     displayName: "Profile Name (JSON file name)"
-    default: "lload-profile-advanced.json"
+    default: "load-profile-advanced.json"
   - name: debug
     type: string
     displayName: "Enable HTTP Debugging"
