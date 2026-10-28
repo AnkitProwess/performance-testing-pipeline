@@ -14,7 +14,7 @@ parameters:
     default: "ankit.kumar@prowesssoft.com"
   - name: apiName
     type: string
-    displayName: "API Name (Subdirectory under repository)"
+    displayName: "API Name (folder name in the API repo, case-sensitive)"
     default: "mule-employees-xapi"
   - name: profileName
     type: string

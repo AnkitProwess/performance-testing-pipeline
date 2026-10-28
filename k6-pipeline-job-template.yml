@@ -24,6 +24,7 @@ jobs:
     # 1. Reference the SMTP secret variable group
     variables:
       - group: email-testing-vg
+      - group: Oauth # OAUTH_TOKEN_URL / OAUTH_CLIENT_ID / OAUTH_CLIENT_SECRET / OAUTH_SCOPE for authType OAUTH2_CLIENT_CREDENTIALS profiles
       - group: dev-test # client_id / client_secret for {{CLIENT_ID}} / {{CLIENT_SECRET}} in the profile; optional GITHUB_PAT for private API repos
 
     steps:
@@ -91,12 +92,20 @@ jobs:
             -e LOAD_PROFILE_PATH="$LOAD_PROFILE_PATH" \
             -e CLIENT_ID \
             -e CLIENT_SECRET \
+            -e OAUTH_TOKEN_URL \
+            -e OAUTH_CLIENT_ID \
+            -e OAUTH_CLIENT_SECRET \
+            -e OAUTH_SCOPE \
             grafana/k6 run $K6_ARGS /apps/k6-engine-script.js || true
         displayName: 'Execute k6 Stress Test Container'
         env:
           DEBUG_PARAM: ${{ parameters.debug }}
           CLIENT_ID: $(client_id)
           CLIENT_SECRET: $(client_secret)
+          OAUTH_TOKEN_URL: $(OAUTH_TOKEN_URL)
+          OAUTH_CLIENT_ID: $(OAUTH_CLIENT_ID)
+          OAUTH_CLIENT_SECRET: $(OAUTH_CLIENT_SECRET)
+          OAUTH_SCOPE: $(OAUTH_SCOPE)
         continueOnError: true # Progress to email reporting even if SLAs or thresholds fail
 
       # 4. Publish the HTML Dashboard Report to Build Artifacts

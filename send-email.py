@@ -75,7 +75,7 @@ if __name__ == '__main__':
 
     if not all([host, user, password]):
         print("[WARNING] SMTP_HOST, SMTP_USER, or SMTP_PASSWORD environment variables are missing.")
-        print("Please configure the 'performance-test-smtp-secrets' variable group in Azure DevOps.")
+        print("Please configure the 'email-testing-vg' variable group in Azure DevOps.")
         print("Skipping email transmission.")
         sys.exit(0)
 

@@ -19,11 +19,40 @@ export const options = {
     thresholds: config.thresholds || defaultThresholds,
 };
 
+// Reusable Helper: Resolve the OAuth settings for an endpoint.
+// An endpoint's own authType/auth overrides the root-level default; authType "NONE" opts the endpoint out.
+function authTypeFor(ep) {
+    return ep.authType !== undefined ? ep.authType : config.authType;
+}
+
+function authFor(ep) {
+    if (authTypeFor(ep) !== 'OAUTH2_CLIENT_CREDENTIALS') {
+        return null;
+    }
+    return ep.auth || config.auth || {};
+}
+
+// One token is fetched per distinct credential set, however many endpoints share it
+function authKey(auth) {
+    return JSON.stringify([auth.tokenUrl, auth.clientId, auth.scope]);
+}
+
 // Reusable Helper: Prepare request configurations
-function prepareRequestSpec(ep) {
+function prepareRequestSpec(ep, tokens) {
     const method = (ep.method || 'GET').toUpperCase();
     const url = ep.endpoint;
-    const headers = ep.headers || { 'Content-Type': 'application/json' };
+    const headers = Object.assign({}, ep.headers || { 'Content-Type': 'application/json' });
+    const auth = authFor(ep);
+    const token = auth && tokens ? tokens[authKey(auth)] : null;
+    if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+    }
+    // Client ID Enforcement: auth.clientId / auth.clientSecret are sent as the client_id / client_secret headers
+    if (authTypeFor(ep) === 'CLIENT_ID_ENFORCEMENT') {
+        const idAuth = ep.auth || config.auth || {};
+        headers['client_id'] = idAuth.clientId;
+        headers['client_secret'] = idAuth.clientSecret;
+    }
     const params = { headers: headers };
 
     let body = null;
@@ -44,8 +73,8 @@ function prepareRequestSpec(ep) {
 }
 
 // Reusable Helper: Execute a single request
-function executeSingleRequest(ep) {
-    const spec = prepareRequestSpec(ep);
+function executeSingleRequest(ep, tokens) {
+    const spec = prepareRequestSpec(ep, tokens);
     if (['GET', 'HEAD'].includes(spec.method)) {
         return http.request(spec.method, spec.url, null, spec.params);
     } else {
@@ -91,11 +120,60 @@ if (currentBatch.length > 0) {
     executionFlow.push({ type: 'batch', items: currentBatch });
 }
 
-export default function () {
+// Fail fast when an auth value was never supplied: missing, an unresolved {{TOKEN}}, or an undefined Azure variable (literal "$(name)")
+function requireAuthValues(auth, keys) {
+    for (const key of keys) {
+        if (!auth[key] || /^\{\{.*\}\}$/.test(auth[key]) || auth[key].startsWith('$(')) {
+            throw new Error(`Auth setup failed: auth.${key} is missing or unresolved. Check the variable group and the profile.`);
+        }
+    }
+}
+
+// Fetch an OAuth 2.0 access token (client credentials grant) for one auth block
+function fetchToken(auth) {
+    requireAuthValues(auth, ['tokenUrl', 'clientId', 'clientSecret', 'scope']);
+
+    const res = http.post(auth.tokenUrl, {
+        grant_type: 'client_credentials',
+        client_id: auth.clientId,
+        client_secret: auth.clientSecret,
+        scope: auth.scope,
+    }, { tags: { name: 'oauth_token_request' } });
+
+    if (res.status !== 200) {
+        // Never print the request (it holds the secret); the IdP error body is safe
+        throw new Error(`OAuth token request failed: HTTP ${res.status} ${res.body}`);
+    }
+
+    const token = res.json('access_token');
+    if (!token) {
+        throw new Error('OAuth token response did not contain an access_token.');
+    }
+    console.log('OAuth access token obtained.');
+    return token;
+}
+
+// Runs once before the load starts: fetch the tokens needed by the endpoints that use OAuth
+export function setup() {
+    const tokens = {};
+    for (const ep of endpoints) {
+        if (authTypeFor(ep) === 'CLIENT_ID_ENFORCEMENT') {
+            requireAuthValues(ep.auth || config.auth || {}, ['clientId', 'clientSecret']);
+        }
+        const auth = authFor(ep);
+        if (auth && tokens[authKey(auth)] === undefined) {
+            tokens[authKey(auth)] = fetchToken(auth);
+        }
+    }
+    return { tokens: tokens };
+}
+
+export default function (data) {
+    const tokens = data ? data.tokens : null;
     for (const step of executionFlow) {
         if (step.type === 'single') {
             const ep = step.item;
-            const res = executeSingleRequest(ep);
+            const res = executeSingleRequest(ep, tokens);
             checkResponse(res, ep);
 
             // Pacing for single request
@@ -104,7 +182,7 @@ export default function () {
                 sleep(sleepDuration);
             }
         } else if (step.type === 'batch') {
-            const batchSpecs = step.items.map(prepareRequestSpec);
+            const batchSpecs = step.items.map((ep) => prepareRequestSpec(ep, tokens));
             
             // Execute batch parallelly
             const responses = http.batch(batchSpecs);
