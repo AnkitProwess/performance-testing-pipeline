@@ -62,6 +62,7 @@ if __name__ == '__main__':
     parser.add_argument("--subject", required=True, help="Email subject")
     parser.add_argument("--report", required=True, help="Path to the HTML report")
     parser.add_argument("--build-url", default="", help="Azure DevOps Build URL")
+    parser.add_argument("--status", default="", help="Test result label, e.g. PASSED or FAILED")
     
     args = parser.parse_args()
 
@@ -105,6 +106,13 @@ if __name__ == '__main__':
 
     print(f"Final resolved recipients: {to_emails}")
 
+    subject = f"[{args.status}] {args.subject}" if args.status else args.subject
+    status_row = f"""
+                    <tr>
+                        <td class="label">Result:</td>
+                        <td><b style="color: {'#107c10' if args.status == 'PASSED' else '#d13438'};">{args.status}</b></td>
+                    </tr>""" if args.status else ""
+
     html_content = f"""
     <html>
     <head>
@@ -129,7 +137,7 @@ if __name__ == '__main__':
             <p>The automated performance stress test execution has completed. You can find the detailed <b>interactive HTML dashboard</b> attached directly to this email.</p>
             
             <div class="details">
-                <table>
+                <table>{status_row}
                     <tr>
                         <td class="label">Pipeline:</td>
                         <td>{os.environ.get('BUILD_DEFINITIONNAME', 'Performance-Stress-Test')}</td>
@@ -155,4 +163,4 @@ if __name__ == '__main__':
     </html>
     """
 
-    send_email(host, port, user, password, sender, to_emails, args.subject, html_content, args.report, smtp_tls)
+    send_email(host, port, user, password, sender, to_emails, subject, html_content, args.report, smtp_tls)
