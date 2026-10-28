@@ -84,6 +84,8 @@ jobs:
             echo "HTTP Debugging is enabled."
           fi
           
+          # Do not stop on a k6 failure: the report and email must still go out. The exit code is recorded and enforced in the final step.
+          set +e
           docker run --rm \
             --user "$(id -u):$(id -g)" \
             -v $(Pipeline.Workspace)/s/api-repo:/apps \
@@ -96,7 +98,11 @@ jobs:
             -e OAUTH_CLIENT_ID \
             -e OAUTH_CLIENT_SECRET \
             -e OAUTH_SCOPE \
-            grafana/k6 run $K6_ARGS /apps/k6-engine-script.js || true
+            grafana/k6 run $K6_ARGS /apps/k6-engine-script.js
+          K6_EXIT=$?
+          echo "k6 exit code: $K6_EXIT (0 = passed, 99 = thresholds failed, other = test could not run)"
+          echo "##vso[task.setvariable variable=K6_EXIT_CODE]$K6_EXIT"
+          exit 0
         displayName: 'Execute k6 Stress Test Container'
         env:
           DEBUG_PARAM: ${{ parameters.debug }}
@@ -106,15 +112,16 @@ jobs:
           OAUTH_CLIENT_ID: $(OAUTH_CLIENT_ID)
           OAUTH_CLIENT_SECRET: $(OAUTH_CLIENT_SECRET)
           OAUTH_SCOPE: $(OAUTH_SCOPE)
-        continueOnError: true # Progress to email reporting even if SLAs or thresholds fail
 
-      # 4. Publish the HTML Dashboard Report to Build Artifacts
+      # 4. Publish the HTML Dashboard Report to Build Artifacts (no report exists when k6 failed before the load started)
       - task: PublishBuildArtifacts@1
         inputs:
           PathtoPublish: '$(Pipeline.Workspace)/s/api-repo/report.html'
           ArtifactName: 'StressTestReport'
           publishLocation: 'Container'
         displayName: 'Archive Test Report HTML'
+        condition: succeededOrFailed()
+        continueOnError: true
 
       # 5. Execute the SMTP email delivery using the Python utility script
       - script: |
@@ -140,15 +147,20 @@ jobs:
             ARTIFACT_VERSION_VAL=$(jq -r '.artifact_version // "N/A"' "$HOST_PROFILE_PATH")
           fi
           
-          echo "Sending report email for API: $API_NAME_VAL, Version: $ARTIFACT_VERSION_VAL"
+          if [ "$K6_EXIT_CODE" = "0" ]; then STATUS="PASSED"; else STATUS="FAILED"; fi
+
+          echo "Sending report email for API: $API_NAME_VAL, Version: $ARTIFACT_VERSION_VAL, Status: $STATUS"
           
           python $(Pipeline.Workspace)/s/master-pipeline-repo/send-email.py \
             --to "${{ parameters.reportRecipient }}" \
             --subject "Performance Test Report - $API_NAME_VAL - Version $ARTIFACT_VERSION_VAL" \
+            --status "$STATUS" \
             --report "$(Pipeline.Workspace)/s/api-repo/report.html" \
             --build-url "$(System.TeamFoundationCollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId)"
         displayName: 'Email Stress Test Report'
+        condition: succeededOrFailed()
         env:
+          K6_EXIT_CODE: $(K6_EXIT_CODE)
           SMTP_HOST: $(SMTP_HOST)
           SMTP_PORT: $(SMTP_PORT)
           SMTP_USER: $(SMTP_USER)
@@ -156,3 +168,15 @@ jobs:
           SMTP_FROM: $(SMTP_FROM)
           SMTP_TLS: $(SMTP_TLS)
           MANDATORY_RECIPIENTS: $(MANDATORY_RECIPIENTS)
+
+      # 6. Fail the build when k6 failed (thresholds crossed or the test could not run), after the report and email have gone out
+      - script: |
+          if [ "$K6_EXIT_CODE" != "0" ]; then
+            echo "##vso[task.logissue type=error]k6 finished with exit code $K6_EXIT_CODE. Check the k6 step log and the report (thresholds failed, or credentials/endpoint rejected)."
+            exit 1
+          fi
+          echo "k6 passed all thresholds."
+        displayName: 'Enforce Test Result'
+        condition: succeededOrFailed()
+        env:
+          K6_EXIT_CODE: $(K6_EXIT_CODE)
