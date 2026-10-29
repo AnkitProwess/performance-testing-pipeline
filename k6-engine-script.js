@@ -1,5 +1,6 @@
 import http from 'k6/http';
 import { check, sleep } from 'k6';
+import { getAuthHandler } from './auth/index.js';
 
 // Read configuration
 const loadProfilePath = __ENV.LOAD_PROFILE_PATH || './load-profile.json';
@@ -19,39 +20,42 @@ export const options = {
     thresholds: config.thresholds || defaultThresholds,
 };
 
-// Reusable Helper: Resolve the OAuth settings for an endpoint.
-// An endpoint's own authType/auth overrides the root-level default; authType "NONE" opts the endpoint out.
-function authTypeFor(ep) {
-    return ep.authType !== undefined ? ep.authType : config.authType;
-}
+// Authentication is pluggable: each authType lives in its own module under ./auth (see auth/index.js).
+// The engine only resolves which module an endpoint uses and calls its validate / setup / apply functions.
+//
+// An endpoint's own authType/authParameters overrides the root-level default; no authType, or "NONE", means no engine-managed auth.
+// Distinct credential sets are collected once, so a token is fetched once however many endpoints share it.
+const authSets = [];
 
-function authFor(ep) {
-    if (authTypeFor(ep) !== 'OAUTH2_CLIENT_CREDENTIALS') {
+function resolveAuth(ep) {
+    const authType = ep.authType !== undefined ? ep.authType : config.authType;
+    if (!authType || authType === 'NONE') {
         return null;
     }
-    return ep.auth || config.auth || {};
+    const handler = getAuthHandler(authType); // throws on an unknown authType, before any load starts
+    const authParameters = ep.authParameters || config.authParameters || {}; // the authParameters block
+    const signature = JSON.stringify([authType, authParameters]);
+    let index = authSets.findIndex((set) => set.signature === signature);
+    if (index < 0) {
+        authSets.push({ signature: signature, handler: handler, authParameters: authParameters });
+        index = authSets.length - 1;
+    }
+    return { handler: handler, authParameters: authParameters, index: index };
 }
 
-// One token is fetched per distinct credential set, however many endpoints share it
-function authKey(auth) {
-    return JSON.stringify([auth.tokenUrl, auth.clientId, auth.scope]);
+const authByEndpoint = new Map();
+for (const ep of config.endpoints || []) {
+    authByEndpoint.set(ep, resolveAuth(ep));
 }
 
 // Reusable Helper: Prepare request configurations
-function prepareRequestSpec(ep, tokens) {
+function prepareRequestSpec(ep, authStates) {
     const method = (ep.method || 'GET').toUpperCase();
     const url = ep.endpoint;
     const headers = Object.assign({}, ep.headers || { 'Content-Type': 'application/json' });
-    const auth = authFor(ep);
-    const token = auth && tokens ? tokens[authKey(auth)] : null;
-    if (token) {
-        headers['Authorization'] = `Bearer ${token}`;
-    }
-    // Client ID Enforcement: auth.clientId / auth.clientSecret are sent as the client_id / client_secret headers
-    if (authTypeFor(ep) === 'CLIENT_ID_ENFORCEMENT') {
-        const idAuth = ep.auth || config.auth || {};
-        headers['client_id'] = idAuth.clientId;
-        headers['client_secret'] = idAuth.clientSecret;
+    const authRef = authByEndpoint.get(ep);
+    if (authRef) {
+        authRef.handler.apply(headers, authRef.authParameters, authStates ? authStates[authRef.index] : null);
     }
     const params = { headers: headers };
 
@@ -73,8 +77,8 @@ function prepareRequestSpec(ep, tokens) {
 }
 
 // Reusable Helper: Execute a single request
-function executeSingleRequest(ep, tokens) {
-    const spec = prepareRequestSpec(ep, tokens);
+function executeSingleRequest(ep, authStates) {
+    const spec = prepareRequestSpec(ep, authStates);
     if (['GET', 'HEAD'].includes(spec.method)) {
         return http.request(spec.method, spec.url, null, spec.params);
     } else {
@@ -120,60 +124,21 @@ if (currentBatch.length > 0) {
     executionFlow.push({ type: 'batch', items: currentBatch });
 }
 
-// Fail fast when an auth value was never supplied: missing, an unresolved {{TOKEN}}, or an undefined Azure variable (literal "$(name)")
-function requireAuthValues(auth, keys) {
-    for (const key of keys) {
-        if (!auth[key] || /^\{\{.*\}\}$/.test(auth[key]) || auth[key].startsWith('$(')) {
-            throw new Error(`Auth setup failed: auth.${key} is missing or unresolved. Check the variable group and the profile.`);
-        }
-    }
-}
-
-// Fetch an OAuth 2.0 access token (client credentials grant) for one auth block
-function fetchToken(auth) {
-    requireAuthValues(auth, ['tokenUrl', 'clientId', 'clientSecret', 'scope']);
-
-    const res = http.post(auth.tokenUrl, {
-        grant_type: 'client_credentials',
-        client_id: auth.clientId,
-        client_secret: auth.clientSecret,
-        scope: auth.scope,
-    }, { tags: { name: 'oauth_token_request' } });
-
-    if (res.status !== 200) {
-        // Never print the request (it holds the secret); the IdP error body is safe
-        throw new Error(`OAuth token request failed: HTTP ${res.status} ${res.body}`);
-    }
-
-    const token = res.json('access_token');
-    if (!token) {
-        throw new Error('OAuth token response did not contain an access_token.');
-    }
-    console.log('OAuth access token obtained.');
-    return token;
-}
-
-// Runs once before the load starts: fetch the tokens needed by the endpoints that use OAuth
+// Runs once before the load starts: validate every credential set, then let its auth module do its one-time work (e.g. fetch a token)
 export function setup() {
-    const tokens = {};
-    for (const ep of endpoints) {
-        if (authTypeFor(ep) === 'CLIENT_ID_ENFORCEMENT') {
-            requireAuthValues(ep.auth || config.auth || {}, ['clientId', 'clientSecret']);
-        }
-        const auth = authFor(ep);
-        if (auth && tokens[authKey(auth)] === undefined) {
-            tokens[authKey(auth)] = fetchToken(auth);
-        }
-    }
-    return { tokens: tokens };
+    const authStates = authSets.map((set) => {
+        set.handler.validate(set.authParameters);
+        return set.handler.setup(set.authParameters);
+    });
+    return { authStates: authStates };
 }
 
 export default function (data) {
-    const tokens = data ? data.tokens : null;
+    const authStates = data ? data.authStates : null;
     for (const step of executionFlow) {
         if (step.type === 'single') {
             const ep = step.item;
-            const res = executeSingleRequest(ep, tokens);
+            const res = executeSingleRequest(ep, authStates);
             checkResponse(res, ep);
 
             // Pacing for single request
@@ -182,7 +147,7 @@ export default function (data) {
                 sleep(sleepDuration);
             }
         } else if (step.type === 'batch') {
-            const batchSpecs = step.items.map((ep) => prepareRequestSpec(ep, tokens));
+            const batchSpecs = step.items.map((ep) => prepareRequestSpec(ep, authStates));
             
             // Execute batch parallelly
             const responses = http.batch(batchSpecs);

@@ -36,6 +36,7 @@ New-Item -ItemType Directory -Path $runDir | Out-Null
 # Copy files to simulate the cloned repository structure
 Copy-Item $profileSource (Join-Path $runDir "load-profile.json")
 Copy-Item (Join-Path $PSScriptRoot "k6-engine-script.js") (Join-Path $runDir "k6-engine-script.js")
+Copy-Item (Join-Path $PSScriptRoot "auth") (Join-Path $runDir "auth") -Recurse
 
 # 3. Detect Runner
 $resolvedRunner = $Runner

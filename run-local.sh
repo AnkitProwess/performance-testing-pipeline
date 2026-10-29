@@ -36,6 +36,7 @@ mkdir -p "$RUN_DIR"
 # Copy files to simulate the cloned repository structure
 cp "$PROFILE_SOURCE" "$RUN_DIR/load-profile.json"
 cp "$SCRIPT_DIR/k6-engine-script.js" "$RUN_DIR/k6-engine-script.js"
+cp -r "$SCRIPT_DIR/auth" "$RUN_DIR/auth"
 
 # 3. Detect Runner
 RESOLVED_RUNNER=$RUNNER

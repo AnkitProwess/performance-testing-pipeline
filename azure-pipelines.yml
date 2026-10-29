@@ -15,11 +15,11 @@ parameters:
   - name: apiName
     type: string
     displayName: "API Name (folder name in the API repo, case-sensitive)"
-    default: "mule-employees-xapi"
+    default: "AI_innovation_poc1"
   - name: profileName
     type: string
     displayName: "Profile Name (JSON file name)"
-    default: "load-profile-advanced.json"
+    default: "load-profile3.json"
   - name: debug
     type: string
     displayName: "Enable HTTP Debugging"

@@ -25,6 +25,7 @@ jobs:
     variables:
       - group: email-testing-vg
       - group: Oauth # OAUTH_TOKEN_URL / OAUTH_CLIENT_ID / OAUTH_CLIENT_SECRET / OAUTH_SCOPE for authType OAUTH2_CLIENT_CREDENTIALS profiles
+      - group: BasicAuth # BASIC_USERNAME / BASIC_PASSWORD for authType BASIC profiles
       - group: dev-test # client_id / client_secret for {{CLIENT_ID}} / {{CLIENT_SECRET}} in the profile; optional GITHUB_PAT for private API repos
 
     steps:
@@ -58,9 +59,10 @@ jobs:
           path: s/master-pipeline-repo
           displayName: 'Checkout Master Pipeline Tooling'
 
-      # 2. Prepare the engine script by placing it in the API configuration workspace
+      # 2. Prepare the engine script and its auth modules (auth/) by placing them in the API configuration workspace
       - script: |
           cp $(Pipeline.Workspace)/s/master-pipeline-repo/k6-engine-script.js $(Pipeline.Workspace)/s/api-repo/
+          cp -r $(Pipeline.Workspace)/s/master-pipeline-repo/auth $(Pipeline.Workspace)/s/api-repo/
         displayName: 'Prepare Engine Script'
 
       # 3. Run the containerized k6 stress test
@@ -98,6 +100,8 @@ jobs:
             -e OAUTH_CLIENT_ID \
             -e OAUTH_CLIENT_SECRET \
             -e OAUTH_SCOPE \
+            -e BASIC_USERNAME \
+            -e BASIC_PASSWORD \
             grafana/k6 run $K6_ARGS /apps/k6-engine-script.js
           K6_EXIT=$?
           echo "k6 exit code: $K6_EXIT (0 = passed, 99 = thresholds failed, other = test could not run)"
@@ -112,6 +116,8 @@ jobs:
           OAUTH_CLIENT_ID: $(OAUTH_CLIENT_ID)
           OAUTH_CLIENT_SECRET: $(OAUTH_CLIENT_SECRET)
           OAUTH_SCOPE: $(OAUTH_SCOPE)
+          BASIC_USERNAME: $(BASIC_USERNAME)
+          BASIC_PASSWORD: $(BASIC_PASSWORD)
 
       # 4. Publish the HTML Dashboard Report to Build Artifacts (no report exists when k6 failed before the load started)
       - task: PublishBuildArtifacts@1
