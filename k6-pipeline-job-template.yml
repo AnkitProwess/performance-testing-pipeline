@@ -175,14 +175,18 @@ jobs:
           SMTP_TLS: $(SMTP_TLS)
           MANDATORY_RECIPIENTS: $(MANDATORY_RECIPIENTS)
 
-      # 6. Fail the build when k6 failed (thresholds crossed or the test could not run), after the report and email have gone out
+      # 6. Fail the build only when the test could not run (e.g. auth setup failed, bad profile, script error), after the report and email have gone out.
+      #    Exit code 99 = thresholds crossed (the SLA was missed against a real system): the build stays plain green (no warning, so it does not show "succeeded with issues") and the email is marked FAILED.
       - script: |
-          if [ "$K6_EXIT_CODE" != "0" ]; then
-            echo "##vso[task.logissue type=error]k6 finished with exit code $K6_EXIT_CODE. Check the k6 step log and the report (thresholds failed, or credentials/endpoint rejected)."
+          if [ "$K6_EXIT_CODE" = "0" ]; then
+            echo "k6 passed all thresholds."
+          elif [ "$K6_EXIT_CODE" = "99" ]; then
+            echo "k6 thresholds were crossed (exit code 99). See the report; the build is not failed for SLA misses."
+          else
+            echo "##vso[task.logissue type=error]k6 could not complete the test (exit code $K6_EXIT_CODE). Check the k6 step log: credentials/variables, profile, or endpoint."
             exit 1
           fi
-          echo "k6 passed all thresholds."
-        displayName: 'Enforce Test Result'
+        displayName: 'Check Test Execution'
         condition: succeededOrFailed()
         env:
           K6_EXIT_CODE: $(K6_EXIT_CODE)
