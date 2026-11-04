@@ -1,0 +1,46 @@
+// templates/Jenkinsfile
+// PLACE THIS FILE IN YOUR API CODE REPOSITORY (as "Jenkinsfile") TO RUN THE PERFORMANCE TEST FROM THAT REPO'S OWN JENKINS JOB.
+//
+// It does not run k6 itself. It calls the central performance-testing job (the root Jenkinsfile of the tooling repo),
+// telling it which repo, folder and load profile to use. The test logic, credentials and email stay in ONE place.
+//
+// Edit the values in `environment` below, then create a Pipeline job for this repo (Pipeline script from SCM).
+
+pipeline {
+    agent any // only triggers the central job, so any agent will do
+
+    options {
+        disableConcurrentBuilds()
+        timeout(time: 3, unit: 'HOURS') // must be longer than the central job's own 2 hour timeout
+    }
+
+    // Optional: run when this repo changes (Jenkins polls Git; best combined with a profile-only change in practice)
+    // triggers { pollSCM('H/15 * * * *') }
+
+    environment {
+        PERF_JOB_NAME    = 'performance-testing-pipeline'                     // name (or folder/name) of the central job in Jenkins
+        API_REPO_URL     = 'https://github.com/<your-org>/<your-api-repo>.git' // this repo
+        API_REPO_BRANCH  = 'main'
+        API_REPO_CRED_ID = ''                                                  // Jenkins credentials ID if this repo is private, else empty
+        API_NAME         = 'my-api'                                            // folder in this repo that holds the load profile (empty = repo root)
+        PROFILE_NAME     = 'load-profile.json'                                 // load profile JSON file name
+        REPORT_RECIPIENT = 'api-team-alerts@company.com'                       // who gets the emailed report
+    }
+
+    stages {
+        stage('Run Performance Test') {
+            steps {
+                // wait/propagate: this build ends with the central job's result (green for a pass or an SLA miss, red if the test could not run)
+                build job: env.PERF_JOB_NAME, wait: true, propagate: true, parameters: [
+                    string(name: 'apiRepoUrl', value: env.API_REPO_URL),
+                    string(name: 'apiRepoBranch', value: env.API_REPO_BRANCH),
+                    string(name: 'apiRepoCredentialsId', value: env.API_REPO_CRED_ID),
+                    string(name: 'apiName', value: env.API_NAME),
+                    string(name: 'profileName', value: env.PROFILE_NAME),
+                    string(name: 'reportRecipient', value: env.REPORT_RECIPIENT),
+                    booleanParam(name: 'debug', value: false)
+                ]
+            }
+        }
+    }
+}

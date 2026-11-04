@@ -1,10 +1,11 @@
 import http from 'k6/http';
 import { check, sleep } from 'k6';
+import exec from 'k6/execution';
 import { getAuthHandler } from './auth/index.js';
 
 // Read configuration
 const loadProfilePath = __ENV.LOAD_PROFILE_PATH || './load-profile.json';
-// Replace {{VAR_NAME}} tokens in the profile with environment values (e.g. secrets from the Azure variable group)
+// Replace {{VAR_NAME}} tokens in the profile with environment values (e.g. secrets from the CI credential store)
 const rawProfile = open(loadProfilePath).replace(/\{\{(\w+)\}\}/g, (match, name) =>
     __ENV[name] !== undefined ? __ENV[name] : match
 );
@@ -92,6 +93,13 @@ function checkResponse(res, ep) {
     check(res, {
         [`status is ${expectedStatus}`]: (r) => r.status === expectedStatus,
     });
+
+    // Rejected credentials make the whole run meaningless (every request fails fast), and as a threshold miss it would pass for an SLA miss (exit 99).
+    // Abort instead: k6 exits with 108, which the pipelines treat as "the test could not run" (build fails, email says FAILED).
+    // A profile that deliberately expects 401/403 is left alone.
+    if ((res.status === 401 || res.status === 403) && res.status !== expectedStatus) {
+        exec.test.abort(`Credentials rejected: HTTP ${res.status} from ${(ep.method || 'GET').toUpperCase()} ${ep.endpoint}. Check the credentials in the Azure variable group / Jenkins credentials.`);
+    }
 }
 
 // Pre-process endpoints into execution flow steps (consecutive matching batchGroups run in parallel)

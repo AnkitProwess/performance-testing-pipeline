@@ -65,51 +65,30 @@ jobs:
           cp -r $(Pipeline.Workspace)/s/master-pipeline-repo/auth $(Pipeline.Workspace)/s/api-repo/
         displayName: 'Prepare Engine Script'
 
-      # 3. Run the containerized k6 stress test
+      # 3. Run the containerized k6 stress test (the docker command and the credential variable list live in ci/run-k6.sh, shared with Jenkins)
       - script: |
           API_NAME="${{ parameters.apiName }}"
           PROFILE_NAME="${{ parameters.profileName }}"
           if [ -z "$PROFILE_NAME" ]; then
             PROFILE_NAME="load-profile.json"
           fi
-          
+
           if [ -z "$API_NAME" ]; then
-            LOAD_PROFILE_PATH="/apps/$PROFILE_NAME"
+            PROFILE_REL="$PROFILE_NAME"
           else
-            LOAD_PROFILE_PATH="/apps/$API_NAME/$PROFILE_NAME"
+            PROFILE_REL="$API_NAME/$PROFILE_NAME"
           fi
-          
-          # Check if debug mode is enabled (via parameter or variable group)
-          K6_ARGS=""
-          if [ "$DEBUG_PARAM" = "true" ]; then
-            K6_ARGS="--http-debug=full"
-            echo "HTTP Debugging is enabled."
-          fi
-          
+
           # Do not stop on a k6 failure: the report and email must still go out. The exit code is recorded and enforced in the final step.
           set +e
-          docker run --rm \
-            --user "$(id -u):$(id -g)" \
-            -v $(Pipeline.Workspace)/s/api-repo:/apps \
-            -e K6_WEB_DASHBOARD=true \
-            -e K6_WEB_DASHBOARD_EXPORT=/apps/report.html \
-            -e LOAD_PROFILE_PATH="$LOAD_PROFILE_PATH" \
-            -e CLIENT_ID \
-            -e CLIENT_SECRET \
-            -e OAUTH_TOKEN_URL \
-            -e OAUTH_CLIENT_ID \
-            -e OAUTH_CLIENT_SECRET \
-            -e OAUTH_SCOPE \
-            -e BASIC_USERNAME \
-            -e BASIC_PASSWORD \
-            grafana/k6 run $K6_ARGS /apps/k6-engine-script.js
+          bash $(Pipeline.Workspace)/s/master-pipeline-repo/ci/run-k6.sh "$(Pipeline.Workspace)/s/api-repo" "$PROFILE_REL" "$DEBUG_PARAM"
           K6_EXIT=$?
-          echo "k6 exit code: $K6_EXIT (0 = passed, 99 = thresholds failed, other = test could not run)"
           echo "##vso[task.setvariable variable=K6_EXIT_CODE]$K6_EXIT"
           exit 0
         displayName: 'Execute k6 Stress Test Container'
         env:
           DEBUG_PARAM: ${{ parameters.debug }}
+          # Variable group values -> the environment variable names the engine reads (see README, "Credential contract")
           CLIENT_ID: $(client_id)
           CLIENT_SECRET: $(client_secret)
           OAUTH_TOKEN_URL: $(OAUTH_TOKEN_URL)
@@ -131,38 +110,26 @@ jobs:
 
       # 5. Execute the SMTP email delivery using the Python utility script
       - script: |
-          # Resolve the load profile configuration file path on the agent host
           API_NAME="${{ parameters.apiName }}"
           PROFILE_NAME="${{ parameters.profileName }}"
           if [ -z "$PROFILE_NAME" ]; then
             PROFILE_NAME="load-profile.json"
           fi
-          
+
           if [ -z "$API_NAME" ]; then
             HOST_PROFILE_PATH="$(Pipeline.Workspace)/s/api-repo/$PROFILE_NAME"
           else
             HOST_PROFILE_PATH="$(Pipeline.Workspace)/s/api-repo/$API_NAME/$PROFILE_NAME"
           fi
-          
-          # Extract apiName and artifact_version from the JSON profile safely
-          if [ ! -f "$HOST_PROFILE_PATH" ]; then
-            API_NAME_VAL="Unknown-API"
-            ARTIFACT_VERSION_VAL="N/A"
-          else
-            API_NAME_VAL=$(jq -r '.apiName // "Unknown-API"' "$HOST_PROFILE_PATH")
-            ARTIFACT_VERSION_VAL=$(jq -r '.artifact_version // "N/A"' "$HOST_PROFILE_PATH")
-          fi
-          
-          if [ "$K6_EXIT_CODE" = "0" ]; then STATUS="PASSED"; else STATUS="FAILED"; fi
 
-          echo "Sending report email for API: $API_NAME_VAL, Version: $ARTIFACT_VERSION_VAL, Status: $STATUS"
-          
-          python $(Pipeline.Workspace)/s/master-pipeline-repo/send-email.py \
-            --to "${{ parameters.reportRecipient }}" \
-            --subject "Performance Test Report - $API_NAME_VAL - Version $ARTIFACT_VERSION_VAL" \
-            --status "$STATUS" \
-            --report "$(Pipeline.Workspace)/s/api-repo/report.html" \
-            --build-url "$(System.TeamFoundationCollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId)"
+          # PASSED / FAILED (+ detail line): one rule shared with Jenkins (ci/status.sh)
+          CI_DIR="$(Pipeline.Workspace)/s/master-pipeline-repo/ci"
+          STATUS=$(sh "$CI_DIR/status.sh" "$K6_EXIT_CODE")
+          DETAIL=$(sh "$CI_DIR/status.sh" "$K6_EXIT_CODE" detail)
+          echo "Sending report email for $HOST_PROFILE_PATH, status: $STATUS"
+
+          # apiName / artifact_version for the subject are read from the profile by send-email.py (--profile)
+          python $(Pipeline.Workspace)/s/master-pipeline-repo/send-email.py             --to "${{ parameters.reportRecipient }}"             --profile "$HOST_PROFILE_PATH"             --status "$STATUS"             --detail "$DETAIL"             --report "$(Pipeline.Workspace)/s/api-repo/report.html"             --build-url "$(System.TeamFoundationCollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId)"
         displayName: 'Email Stress Test Report'
         condition: succeededOrFailed()
         env:
@@ -175,15 +142,19 @@ jobs:
           SMTP_TLS: $(SMTP_TLS)
           MANDATORY_RECIPIENTS: $(MANDATORY_RECIPIENTS)
 
-      # 6. Fail the build only when the test could not run (e.g. auth setup failed, bad profile, script error), after the report and email have gone out.
-      #    Exit code 99 = thresholds crossed (the SLA was missed against a real system): the build stays plain green (no warning, so it does not show "succeeded with issues") and the email is marked FAILED.
+      # 6. Decide the build result after the report and email have gone out.
+      #    exit 0  = green.
+      #    exit 99 = SLA MISSED (thresholds crossed): the build is NOT failed, but ends "succeeded with issues" (warning) and the email is PASSED with an "SLA MISSED" message.
+      #    other   = the test could not run (rejected credentials = 108, setup/script error = 107, bad profile ...): the build fails.
       - script: |
           if [ "$K6_EXIT_CODE" = "0" ]; then
             echo "k6 passed all thresholds."
           elif [ "$K6_EXIT_CODE" = "99" ]; then
-            echo "k6 thresholds were crossed (exit code 99). See the report; the build is not failed for SLA misses."
+            echo "##vso[task.logissue type=warning]SLA MISSED: k6 thresholds were crossed (exit code 99). See the report; the build is not failed for SLA misses."
           else
-            echo "##vso[task.logissue type=error]k6 could not complete the test (exit code $K6_EXIT_CODE). Check the k6 step log: credentials/variables, profile, or endpoint."
+            CI_DIR="$(Pipeline.Workspace)/s/master-pipeline-repo/ci"
+            DETAIL=$(sh "$CI_DIR/status.sh" "$K6_EXIT_CODE" detail)
+            echo "##vso[task.logissue type=error]$DETAIL (k6 exit code $K6_EXIT_CODE)"
             exit 1
           fi
         displayName: 'Check Test Execution'

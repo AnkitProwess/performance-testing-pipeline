@@ -1,11 +1,25 @@
 import os
 import sys
+import html
+import json
 import smtplib
 import argparse
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.base import MIMEBase
 from email import encoders
+
+def profile_labels(profile_path):
+    """apiName and artifact_version from the load profile, for the email subject (replaces the old jq call)."""
+    api_name, version = "Unknown-API", "N/A"
+    try:
+        with open(profile_path, encoding="utf-8") as f:
+            profile = json.load(f)
+        api_name = profile.get("apiName") or api_name
+        version = profile.get("artifact_version") or version
+    except Exception as e:
+        print(f"[WARNING] Could not read apiName/artifact_version from {profile_path}: {e}", file=sys.stderr)
+    return api_name, version
 
 def send_email(smtp_host, smtp_port, smtp_user, smtp_pass, smtp_from, to_email, subject, body_html, attachment_path=None, smtp_tls="false"):
     msg = MIMEMultipart()
@@ -59,24 +73,26 @@ def send_email(smtp_host, smtp_port, smtp_user, smtp_pass, smtp_from, to_email, 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Send performance test email report.")
     parser.add_argument("--to", required=True, help="Recipient email")
-    parser.add_argument("--subject", required=True, help="Email subject")
+    parser.add_argument("--subject", default="", help="Email subject (built from --profile when omitted)")
+    parser.add_argument("--profile", default="", help="Path to the load profile JSON; supplies apiName and artifact_version for the subject")
     parser.add_argument("--report", required=True, help="Path to the HTML report")
-    parser.add_argument("--build-url", default="", help="Azure DevOps Build URL")
-    parser.add_argument("--status", default="", help="Test result label, e.g. PASSED or FAILED")
+    parser.add_argument("--build-url", default="", help="Link to the CI build (Jenkins BUILD_URL)")
+    parser.add_argument("--status", default="", help="Test result label: PASSED or FAILED (see ci/status.sh)")
+    parser.add_argument("--detail", default="", help="One-line explanation of the result, shown under the label")
     
     args = parser.parse_args()
 
-    # Load credentials from environment variables (mapped from Azure DevOps Variable Group)
+    # Load credentials from environment variables (Jenkins credentials / Azure DevOps variable group)
     host = os.environ.get("SMTP_HOST")
     port = os.environ.get("SMTP_PORT", "587")
     user = os.environ.get("SMTP_USER")
     password = os.environ.get("SMTP_PASSWORD")
-    sender = os.environ.get("SMTP_FROM", "perf-alerts@company.com")
+    sender = os.environ.get("SMTP_FROM") or user or "perf-alerts@company.com"
     smtp_tls = os.environ.get("SMTP_TLS", "false")
 
     if not all([host, user, password]):
         print("[WARNING] SMTP_HOST, SMTP_USER, or SMTP_PASSWORD environment variables are missing.")
-        print("Please configure the 'email-testing-vg' variable group in Azure DevOps.")
+        print("Please configure the 'perf-smtp' credential in Jenkins (or the 'email-testing-vg' variable group in Azure DevOps).")
         print("Skipping email transmission.")
         sys.exit(0)
 
@@ -106,12 +122,24 @@ if __name__ == '__main__':
 
     print(f"Final resolved recipients: {to_emails}")
 
-    subject = f"[{args.status}] {args.subject}" if args.status else args.subject
+    base_subject = args.subject
+    if not base_subject:
+        api_name, version = profile_labels(args.profile) if args.profile else ("Unknown-API", "N/A")
+        base_subject = f"Performance Test Report - {api_name} - Version {version}"
+    subject = f"[{args.status}] {base_subject}" if args.status else base_subject
+    status_color = "#107c10" if args.status == "PASSED" else "#d13438"  # green for PASSED, red for FAILED
+    detail_html = f'<br><span style="font-size: 13px;">{html.escape(args.detail)}</span>' if args.detail else ""
     status_row = f"""
                     <tr>
                         <td class="label">Result:</td>
-                        <td><b style="color: {'#107c10' if args.status == 'PASSED' else '#d13438'};">{args.status}</b></td>
+                        <td><b style="color: {status_color};">{html.escape(args.status)}</b>{detail_html}</td>
                     </tr>""" if args.status else ""
+
+    has_report = bool(args.report) and os.path.exists(args.report)
+    report_intro = ("The detailed <b>interactive HTML dashboard</b> is attached to this email." if has_report
+                    else "No report was produced because the test did not get as far as generating load.")
+    report_hint = ("Please download and open the attached <code>report.html</code> file in a web browser to analyze transaction response times, load stages, and SLA threshold violations."
+                   if has_report else "Check the build log for the reason.")
 
     html_content = f"""
     <html>
@@ -134,26 +162,26 @@ if __name__ == '__main__':
                 <h2>Performance Test Report</h2>
             </div>
             <p>Hello,</p>
-            <p>The automated performance stress test execution has completed. You can find the detailed <b>interactive HTML dashboard</b> attached directly to this email.</p>
+            <p>The automated performance stress test execution has finished. {report_intro}</p>
             
             <div class="details">
                 <table>{status_row}
                     <tr>
                         <td class="label">Pipeline:</td>
-                        <td>{os.environ.get('BUILD_DEFINITIONNAME', 'Performance-Stress-Test')}</td>
+                        <td>{os.environ.get('JOB_NAME') or os.environ.get('BUILD_DEFINITIONNAME', 'Performance-Stress-Test')}</td>
                     </tr>
                     <tr>
-                        <td class="label">Build ID:</td>
-                        <td>{os.environ.get('BUILD_BUILDID', 'N/A')}</td>
+                        <td class="label">Build:</td>
+                        <td>{os.environ.get('BUILD_NUMBER') or os.environ.get('BUILD_BUILDID', 'N/A')}</td>
                     </tr>
                     <tr>
                         <td class="label">Build Link:</td>
-                        <td><a href="{args.build_url}">View Build in Azure DevOps</a></td>
+                        <td><a href="{args.build_url}">View Build</a></td>
                     </tr>
                 </table>
             </div>
 
-            <p>Please download and open the attached <code>report.html</code> file in a web browser to analyze transaction response times, load stages, and SLA threshold violations.</p>
+            <p>{report_hint}</p>
             
             <div class="footer">
                 This is an automated message sent by the Performance Pipeline Tooling.
