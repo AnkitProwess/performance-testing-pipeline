@@ -56,16 +56,35 @@ Run parameters (same names in both tools):
 |---|---|---|---|
 | `0` | All thresholds met | green | `[PASSED]` |
 | `99` | The test ran, but an SLA threshold (latency / error rate) was crossed | **green with a warning** (Azure: "succeeded with issues"; Jenkins: yellow stage, build stays SUCCESS) | `[PASSED]` (green) with the message **"SLA MISSED: ..."** below it |
-| `108` | The API **rejected the credentials** (HTTP 401/403); the engine aborted the run | **red** | `[FAILED]` |
-| `107` | The test could not start (wrong OAuth secret, unresolved variable, script error) | **red** | `[FAILED]` |
-| anything else | The test could not run (bad profile, Docker error, ...) | **red** | `[FAILED]` |
+| `108` | The engine **stopped the run early** (see the reasons below) | **red** | `[FAILED]` + the exact reason |
+| `107` | The test could not start: setup or script error (see the reasons below) | **red** | `[FAILED]` + the exact reason |
+| anything else | The test could not run (Docker error, killed process, ...) | **red** | `[FAILED]` + what the exit code proves |
 
 Notes:
 
 - `FAILED` is reserved for "the test could not run". An SLA miss is shown as `PASSED` (the test itself worked) with an "SLA MISSED" message under the result, so read that line, not just the subject.
 - **Wrong credentials fail the build.** If any request gets 401 or 403 (and the profile did not set `expectedStatus` to that code), the engine aborts the run at once. Previously a 100%-failed run only crossed a threshold and looked like an SLA miss.
-- Each email shows the label and a one-line explanation. If the test never got as far as generating load, there is no report attached and the email says so.
+- **A run where nothing succeeds fails the build too.** If a VU makes 10 requests and none returns the expected status (404 from a wrong URL, 500, host unreachable), the engine aborts the same way. Without this, such a run only crossed the failed-request threshold (exit 99) and looked like an SLA miss. Once at least one request has succeeded, later errors are *not* aborted: they count towards the thresholds, so a real degradation is still reported as an SLA miss.
+- Each email shows the label and a one-line reason (next section). If the test never got as far as generating load, there is no report attached and the email says so.
 - Rules live in `ci/status.sh` and `ci/run-k6.sh`. Changing them changes both tools.
+
+### Why a run failed: how the reason is chosen
+
+The same exit code can have several causes (108 covers both rejected credentials and "nothing ever succeeded"; 107 covers any setup error), so the reason is **not guessed from the exit code**. The engine states it itself, in one log line `PERF_REASON|<CODE>|<text>` written just before it stops. `ci/run-k6.sh` keeps the first such line in `k6-reason.txt` and `ci/status.sh` puts the text into the email and the build log. The text only contains facts the engine knows (a status code, a key name, the identity provider's standard error code). It never contains a secret, a token, a response body, a query string or a host name taken from an error message.
+
+| Reason code | Email says (summary) |
+|---|---|
+| `CREDENTIALS_REJECTED` | The API answered HTTP 401 (not authenticated) / 403 (not permitted) for `GET <url>`; the credentials or token were not accepted. Check they are correct, not expired and allowed to call this API. |
+| `NO_SUCCESS` | None of the first 10 requests of a virtual user returned the expected status; the last one got HTTP 404 (not found) / 5xx (server error) / no HTTP response. Followed by a matching hint (check the URL, the API's logs, or the network). |
+| `TOKEN_REQUEST_FAILED` | The identity provider answered the OAuth token request with HTTP N (error: `invalid_client`, ...). Check the token URL, client ID, client secret (not expired) and scope. Or: the token URL could not be reached. |
+| `TOKEN_RESPONSE_INVALID` | The token request returned HTTP 200 but no `access_token`. |
+| `MISSING_VALUE` | The value `authParameters.<key>` was not supplied: missing from the profile, or its variable group / Jenkins credential does not exist or is empty. |
+| `PROFILE_NOT_FOUND` / `PROFILE_INVALID` | The profile could not be read (check `apiName`, `profileName`, branch) / is not valid JSON. |
+| `UNKNOWN_AUTH_TYPE` | The `authType` is not one of the supported values (lists them). |
+| *(no reason captured)* | Only what the exit code proves: 107 "could not start or crashed with a script error", 108 "stopped early by the engine", 125-127 "Docker could not start the container", 137 "killed, which usually means out of memory", otherwise "could not complete (exit code N)". All point to the k6 step log. |
+
+Wording rule: say what was observed ("the API answered HTTP 401"), then what to check, and never claim a cause that was not observed. For example a 401 is reported as "credentials or token not accepted", not as "wrong password".
+
 
 ## 4. Credential contract (the part that must stay the same)
 
@@ -167,8 +186,8 @@ The profile lives in the API repo (`<apiName>/<profileName>`); the API repo need
 | Symptom | Likely cause |
 |---|---|
 | Azure run fails before any step: variable group not found / not authorised | A group the template references does not exist or the pipeline is not authorised for it |
-| `[FAILED]`, k6 exit 108 | The API rejected the credentials (401/403): fix the value in the variable group / Jenkins credential, then check it in Postman |
-| `[FAILED]`, k6 exit 107 | `setup()` threw: wrong OAuth secret, unresolved variable (`authParameters.<key> is missing or unresolved`), or a profile error |
+| `[FAILED]`, k6 exit 108 | The email states the reason (`CREDENTIALS_REJECTED` or `NO_SUCCESS`, see section 3). Same text is in the k6 step log |
+| `[FAILED]`, k6 exit 107 | Setup or script error. The email states the reason when the engine knows it (token request failed, missing value, bad profile; section 3). Otherwise read the k6 step log |
 | `[PASSED]` with "SLA MISSED" in the message | The test is fine; latency or error rate crossed a threshold in the profile. Open the report, or agree new thresholds with the team lead |
 | Azure: "No hosted parallelism has been purchased or granted" | See section 5, step 3 |
 | Jenkins: "Load profile not found in the API repo" | Check `apiName` (case-sensitive), `profileName` and `apiRepoBranch` |

@@ -125,7 +125,8 @@ jobs:
           # PASSED / FAILED (+ detail line): one rule shared with Jenkins (ci/status.sh)
           CI_DIR="$(Pipeline.Workspace)/s/master-pipeline-repo/ci"
           STATUS=$(sh "$CI_DIR/status.sh" "$K6_EXIT_CODE")
-          DETAIL=$(sh "$CI_DIR/status.sh" "$K6_EXIT_CODE" detail)
+          REASON_FILE="$(Pipeline.Workspace)/s/api-repo/k6-reason.txt"
+          DETAIL=$(sh "$CI_DIR/status.sh" "$K6_EXIT_CODE" detail "$REASON_FILE")
           echo "Sending report email for $HOST_PROFILE_PATH, status: $STATUS"
 
           # apiName / artifact_version for the subject are read from the profile by send-email.py (--profile)
@@ -153,7 +154,8 @@ jobs:
             echo "##vso[task.logissue type=warning]SLA MISSED: k6 thresholds were crossed (exit code 99). See the report; the build is not failed for SLA misses."
           else
             CI_DIR="$(Pipeline.Workspace)/s/master-pipeline-repo/ci"
-            DETAIL=$(sh "$CI_DIR/status.sh" "$K6_EXIT_CODE" detail)
+            REASON_FILE="$(Pipeline.Workspace)/s/api-repo/k6-reason.txt"
+            DETAIL=$(sh "$CI_DIR/status.sh" "$K6_EXIT_CODE" detail "$REASON_FILE")
             echo "##vso[task.logissue type=error]$DETAIL (k6 exit code $K6_EXIT_CODE)"
             exit 1
           fi

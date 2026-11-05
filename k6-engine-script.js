@@ -2,14 +2,29 @@ import http from 'k6/http';
 import { check, sleep } from 'k6';
 import exec from 'k6/execution';
 import { getAuthHandler } from './auth/index.js';
+import { emitReason } from './auth/common.js';
 
 // Read configuration
 const loadProfilePath = __ENV.LOAD_PROFILE_PATH || './load-profile.json';
 // Replace {{VAR_NAME}} tokens in the profile with environment values (e.g. secrets from the CI credential store)
-const rawProfile = open(loadProfilePath).replace(/\{\{(\w+)\}\}/g, (match, name) =>
-    __ENV[name] !== undefined ? __ENV[name] : match
-);
-const config = JSON.parse(rawProfile);
+function loadProfile() {
+    let text;
+    try {
+        text = open(loadProfilePath);
+    } catch (e) {
+        emitReason('PROFILE_NOT_FOUND', `The load profile could not be read (${loadProfilePath}). Check apiName (folder, case-sensitive), profileName and the branch.`);
+        throw e;
+    }
+    text = text.replace(/\{\{(\w+)\}\}/g, (match, name) => (__ENV[name] !== undefined ? __ENV[name] : match));
+    try {
+        return JSON.parse(text);
+    } catch (e) {
+        // The parser message is not repeated in the reason: the text now holds the substituted secrets
+        emitReason('PROFILE_INVALID', `The load profile is not valid JSON (${loadProfilePath}). Check it for a missing comma, bracket or quote.`);
+        throw e;
+    }
+}
+const config = loadProfile();
 
 const defaultThresholds = {
     http_req_failed: ['rate<0.01'],
@@ -33,7 +48,13 @@ function resolveAuth(ep) {
     if (!authType || authType === 'NONE') {
         return null;
     }
-    const handler = getAuthHandler(authType); // throws on an unknown authType, before any load starts
+    let handler;
+    try {
+        handler = getAuthHandler(authType); // throws on an unknown authType, before any load starts
+    } catch (e) {
+        emitReason('UNKNOWN_AUTH_TYPE', e.message);
+        throw e;
+    }
     const authParameters = ep.authParameters || config.authParameters || {}; // the authParameters block
     const signature = JSON.stringify([authType, authParameters]);
     let index = authSets.findIndex((set) => set.signature === signature);
@@ -88,17 +109,51 @@ function executeSingleRequest(ep, authStates) {
 }
 
 // Reusable Helper: Validate response status
+const NO_SUCCESS_LIMIT = 10; // requests a VU may make without a single expected response before the run is judged invalid
+let vuRequests = 0;
+let vuSuccesses = 0;
+
+// Stops the whole test. k6 exits with 108, which the pipelines treat as "the test could not run" (red build, email says FAILED).
+// The reason line is what the email shows, so it only states what is known.
+function abortRun(code, text) {
+    exec.test.abort(emitReason(code, text));
+}
+
+function describeStatus(status) {
+    if (status === 0) return 'no HTTP response (the connection failed)';
+    if (status === 404) return 'HTTP 404 (not found)';
+    if (status >= 500) return `HTTP ${status} (server error)`;
+    return `HTTP ${status}`;
+}
+
+function nextStepHint(status) {
+    if (status === 0) return 'Check the host name, network access and that the API is running.';
+    if (status === 404) return 'Check the endpoint URL / path and that the API is deployed.';
+    if (status >= 500) return 'The API itself is failing; check its logs.';
+    return 'Check the endpoint URL, the request method / payload and expectedStatus in the profile.';
+}
+
 function checkResponse(res, ep) {
     const expectedStatus = ep.expectedStatus || 200;
     check(res, {
         [`status is ${expectedStatus}`]: (r) => r.status === expectedStatus,
     });
 
-    // Rejected credentials make the whole run meaningless (every request fails fast), and as a threshold miss it would pass for an SLA miss (exit 99).
-    // Abort instead: k6 exits with 108, which the pipelines treat as "the test could not run" (build fails, email says FAILED).
+    const where = `${(ep.method || 'GET').toUpperCase()} ${String(ep.endpoint).split('?')[0]}`; // no query string: it may carry secrets
+
+    // Rejected credentials make the whole run meaningless (every request is turned away), and as a threshold miss it would pass for an SLA miss (exit 99).
     // A profile that deliberately expects 401/403 is left alone.
     if ((res.status === 401 || res.status === 403) && res.status !== expectedStatus) {
-        exec.test.abort(`Credentials rejected: HTTP ${res.status} from ${(ep.method || 'GET').toUpperCase()} ${ep.endpoint}. Check the credentials in the Azure variable group / Jenkins credentials.`);
+        abortRun('CREDENTIALS_REJECTED', `The API answered HTTP ${res.status} (${res.status === 401 ? 'not authenticated' : 'not permitted'}) for ${where}, so the credentials or token were not accepted. Check that they are correct, not expired, and allowed to call this API.`);
+    }
+
+    // A run where nothing ever succeeds is not an SLA miss either: it would only cross the failed-request threshold (exit 99) and look like a pass with a warning.
+    // Counters are per VU (each VU has its own copy of this module). Failures after a first success are NOT aborted: they count towards the thresholds.
+    vuRequests++;
+    if (res.status === expectedStatus) {
+        vuSuccesses++;
+    } else if (vuSuccesses === 0 && vuRequests >= NO_SUCCESS_LIMIT) {
+        abortRun('NO_SUCCESS', `None of the first ${vuRequests} requests of a virtual user returned the expected HTTP ${expectedStatus}; the last one got ${describeStatus(res.status)} from ${where}. ${nextStepHint(res.status)}`);
     }
 }
 

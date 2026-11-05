@@ -10,6 +10,7 @@
 #
 # Credentials are read from the environment (set by the CI tool) and passed to the container by NAME only,
 # never as values on the command line. A name that is not set on the host is simply not passed on.
+# Writes <api-repo-dir>/k6-reason.txt when the engine stated why it stopped (empty otherwise).
 # Exit code = k6's exit code: 0 passed, 99 thresholds crossed, anything else = the test could not run.
 
 API_DIR="${1:?api-repo-dir missing}"
@@ -38,6 +39,12 @@ fi
 
 docker pull -q "$K6_IMAGE" > /dev/null || echo "Could not pull $K6_IMAGE, using the local copy if present."
 
+# The engine logs one line "PERF_REASON|<CODE>|<text>" just before it stops a run (see auth/common.js, emitReason). The output is copied to a
+# temporary file (outside the workspace, deleted below) so the FIRST such line can be kept in k6-reason.txt for ci/status.sh and the email.
+REASON_FILE="$API_DIR/k6-reason.txt"
+rm -f "$REASON_FILE"
+K6_LOG="$(mktemp)"
+
 docker run --rm \
   --user "$(id -u):$(id -g)" \
   -v "$API_DIR:/apps" \
@@ -45,8 +52,11 @@ docker run --rm \
   -e K6_WEB_DASHBOARD_EXPORT=/apps/report.html \
   -e LOAD_PROFILE_PATH="/apps/$PROFILE_REL" \
   "${ENV_ARGS[@]}" \
-  "$K6_IMAGE" run "${K6_ARGS[@]}" /apps/k6-engine-script.js
-K6_EXIT=$?
+  "$K6_IMAGE" run "${K6_ARGS[@]}" /apps/k6-engine-script.js 2>&1 | tee "$K6_LOG"
+K6_EXIT=${PIPESTATUS[0]}
+
+grep -o 'PERF_REASON|[A-Z_]*|[^"]*' "$K6_LOG" | head -n 1 > "$REASON_FILE"
+rm -f "$K6_LOG"
 
 echo "k6 exit code: $K6_EXIT (0 = passed, 99 = SLA thresholds crossed, other = test could not run)"
 exit $K6_EXIT

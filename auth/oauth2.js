@@ -1,6 +1,6 @@
 // authType "OAUTH2_CLIENT_CREDENTIALS": fetch a token once in setup(), send it as "Authorization: Bearer <token>"
 import http from 'k6/http';
-import { requireAuthValues } from './common.js';
+import { requireAuthValues, emitReason } from './common.js';
 
 export default {
     validate(authParameters) {
@@ -21,12 +21,19 @@ export default {
         }, { tags: { name: 'oauth_token_request' } });
 
         if (res.status !== 200) {
+            // Only the standard OAuth "error" code (e.g. invalid_client) goes into the reason, never the body or the request
+            let idpError = '';
+            try { idpError = String(res.json('error') || '').replace(/[^A-Za-z0-9_.-]/g, ''); } catch (e) { /* no JSON body */ }
+            emitReason('TOKEN_REQUEST_FAILED', res.status === 0
+                ? 'The OAuth token URL could not be reached (no HTTP response). Check the token URL and that the agent has network access to it.'
+                : `The identity provider answered the OAuth token request with HTTP ${res.status}${idpError ? ` (error: ${idpError})` : ''}. Check the token URL, client ID, client secret (and that it has not expired) and the scope.`);
             // Never print the request (it holds the secret); the IdP error body is safe
             throw new Error(`OAuth token request failed: HTTP ${res.status} ${res.body}`);
         }
 
         const token = res.json('access_token');
         if (!token) {
+            emitReason('TOKEN_RESPONSE_INVALID', 'The OAuth token request returned HTTP 200 but the response contained no access_token. Check the token URL and the scope.');
             throw new Error('OAuth token response did not contain an access_token.');
         }
         console.log('OAuth access token obtained.');

@@ -186,7 +186,7 @@ pipeline {
                             sh '''
                                 # PASSED / FAILED (+ detail line): one rule shared with Azure DevOps (ci/status.sh)
                                 STATUS=$(sh master-pipeline-repo/ci/status.sh "$K6_EXIT_CODE")
-                                DETAIL=$(sh master-pipeline-repo/ci/status.sh "$K6_EXIT_CODE" detail)
+                                DETAIL=$(sh master-pipeline-repo/ci/status.sh "$K6_EXIT_CODE" detail api-repo/k6-reason.txt)
                                 echo "Sending report email for $PROFILE_REL, status: $STATUS"
 
                                 # send-email.py runs in a container, so the agent needs no Python. Secrets are passed by name only.
@@ -234,7 +234,7 @@ pipeline {
                             error('WARNING: SLA MISSED, k6 thresholds were crossed (exit code 99). See the report; the build is not failed for SLA misses.')
                         }
                     } else {
-                        String detail = sh(returnStdout: true, script: 'sh master-pipeline-repo/ci/status.sh "$K6_EXIT_CODE" detail').trim()
+                        String detail = sh(returnStdout: true, script: 'sh master-pipeline-repo/ci/status.sh "$K6_EXIT_CODE" detail api-repo/k6-reason.txt').trim()
                         error("${detail} (k6 exit code ${env.K6_EXIT_CODE})")
                     }
                 }
