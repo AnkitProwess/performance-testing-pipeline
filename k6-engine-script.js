@@ -113,6 +113,7 @@ const endpointStats = new Map();
         okDuration: new Trend(`ep${n}_ok_duration`, true),
     });
 });
+const okDurationAll = new Trend('ok_duration', true); // response time of the requests that returned an expected status, all endpoints together
 
 // Reusable Helper: Prepare request configurations
 function prepareRequestSpec(ep, authStates) {
@@ -198,6 +199,7 @@ function checkResponse(res, ep) {
         stats.duration.add(res.timings.duration);
         if (ok) {
             stats.okDuration.add(res.timings.duration);
+            okDurationAll.add(res.timings.duration);
         }
     }
 
@@ -271,8 +273,10 @@ export function handleSummary(data) {
         const noResponse = count(`ep${index}_no_response`);
         const answered = requests - noResponse; // requests that got an HTTP response
         const bad = values(`ep${index}_bad_status`);
+        const badCount = requests - okCount - noResponse; // unexpected HTTP statuses (a Trend carries no count, so it is derived)
+        const hasBad = badCount > 0 && typeof bad.min === 'number';
         const expected = stats.expected.join(' or ');
-        const badText = bad.count > 0 ? `HTTP ${bad.min === bad.max ? bad.min : bad.min + '-' + bad.max}` : '';
+        const badText = hasBad ? `HTTP ${bad.min === bad.max ? bad.min : bad.min + '-' + bad.max}` : '';
         const latencyAll = answered > 0 ? trendOf(metrics[`ep${index}_duration`]) : null;
         const latencyOk = okCount > 0 ? trendOf(metrics[`ep${index}_ok_duration`]) : null;
 
@@ -305,14 +309,14 @@ export function handleSummary(data) {
             errorRate: requests > 0 ? round((requests - okCount) / requests, 4) : null,
             requestsPerSec: round(values(`ep${index}_requests`).rate, 2),
             statusCodes: statusCodes,
-            badStatusRange: bad.count > 0 ? { min: bad.min, max: bad.max } : null,
+            badStatusRange: hasBad ? { min: bad.min, max: bad.max } : null,
             latencyOk: latencyOk,   // response time of the requests that returned an expected status: use this for SLAs
             latencyAll: latencyAll, // response time of every request that got an answer (an error page is usually faster)
         });
 
         let detail = '';
         if (badText) {
-            detail += `, ${badText} x${bad.count}`;
+            detail += `, ${badText} x${badCount}`;
         }
         if (noResponse > 0) {
             detail += `, no response x${noResponse}`;
@@ -374,7 +378,8 @@ export function handleSummary(data) {
             dataSentBytes: count('data_sent'),
         },
         latency: {
-            overall: trendOf(metrics.http_req_duration),
+            overall: trendOf(metrics.http_req_duration),    // every response, including fast error responses (this is what the k6 thresholds see)
+            overallOk: endpointResults.some((e) => e.ok > 0) ? trendOf(metrics.ok_duration) : null, // only requests that returned an expected status
             iteration: trendOf(metrics.iteration_duration),
             // where the time goes: waiting = server think time (TTFB); blocked / connecting / tlsHandshaking mostly occur on the first request of each VU
             breakdown: {

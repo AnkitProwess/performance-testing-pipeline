@@ -35,7 +35,7 @@ def unique(addresses, exclude=()):
             result.append(a)
     return result
 
-def send_email(smtp_host, smtp_port, smtp_user, smtp_pass, smtp_from, to_email, subject, body_html, attachment_path=None, smtp_tls="false", cc_email=""):
+def send_email(smtp_host, smtp_port, smtp_user, smtp_pass, smtp_from, to_email, subject, body_html, attachment_paths=(), smtp_tls="false", cc_email=""):
     msg = MIMEMultipart()
     msg['From'] = smtp_from
     msg['To'] = to_email
@@ -45,7 +45,9 @@ def send_email(smtp_host, smtp_port, smtp_user, smtp_pass, smtp_from, to_email, 
 
     msg.attach(MIMEText(body_html, 'html'))
 
-    if attachment_path and os.path.exists(attachment_path):
+    for attachment_path in attachment_paths:
+        if not (attachment_path and os.path.exists(attachment_path)):
+            continue
         filename = os.path.basename(attachment_path)
         try:
             with open(attachment_path, "rb") as attachment:
@@ -93,7 +95,7 @@ if __name__ == '__main__':
     parser.add_argument("--cc", default="", help="Optional Cc email(s), comma or semicolon separated (empty = no Cc)")
     parser.add_argument("--subject", default="", help="Email subject (built from --profile when omitted)")
     parser.add_argument("--profile", default="", help="Path to the load profile JSON; supplies apiName and artifact_version for the subject")
-    parser.add_argument("--report", required=True, help="Path to the HTML report")
+    parser.add_argument("--report", required=True, help="Path to the HTML report to attach (report.html)")
     parser.add_argument("--build-url", default="", help="Link to the CI build (Jenkins BUILD_URL)")
     parser.add_argument("--status", default="", help="Test result label: PASSED or FAILED (see ci/status.sh)")
     parser.add_argument("--detail", default="", help="One-line explanation of the result, shown under the label")
@@ -207,4 +209,4 @@ if __name__ == '__main__':
     </html>
     """
 
-    send_email(host, port, user, password, sender, to_emails, subject, html_content, args.report, smtp_tls, cc_emails)
+    send_email(host, port, user, password, sender, to_emails, subject, html_content, [args.report], smtp_tls, cc_emails)

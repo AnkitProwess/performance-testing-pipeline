@@ -180,9 +180,33 @@ pipeline {
             }
         }
 
+        stage('Build Custom Report') {
+            steps {
+                // The custom report is a convenience: if it cannot be built the stage turns yellow but the build result is untouched. Runs in a container, so the agent needs no Python.
+                catchError(buildResult: 'SUCCESS', stageResult: 'UNSTABLE', message: 'Custom report could not be built') {
+                    sh '''
+                        STATUS=$(sh master-pipeline-repo/ci/status.sh "$K6_EXIT_CODE")
+                        DETAIL=$(sh master-pipeline-repo/ci/status.sh "$K6_EXIT_CODE" detail api-repo/k6-reason.txt)
+                        docker run --rm \
+                            --user "$(id -u):$(id -g)" \
+                            -v "$WORKSPACE:/work" \
+                            -e PYTHONDONTWRITEBYTECODE=1 \
+                            "$EMAIL_IMAGE" python /work/master-pipeline-repo/report/build_report.py \
+                                --results /work/api-repo/results.json \
+                                --dashboard /work/api-repo/k6-dashboard.html \
+                                --out /work/api-repo/report.html \
+                                --status "$STATUS" \
+                                --detail "$DETAIL" \
+                                --exit-code "$K6_EXIT_CODE" \
+                                --build-url "$BUILD_URL"
+                    '''
+                }
+            }
+        }
+
         stage('Archive Report and Email') {
             steps {
-                archiveArtifacts artifacts: 'api-repo/report.html,api-repo/results.json', allowEmptyArchive: true // neither exists when k6 failed before the load started
+                archiveArtifacts artifacts: 'api-repo/report.html', allowEmptyArchive: true // no report exists when k6 failed before the load started
 
                 // A delivery problem must not hide the test result: mark the build UNSTABLE and carry on to the final check
                 catchError(buildResult: 'UNSTABLE', stageResult: 'UNSTABLE', message: 'Report email could not be sent') {

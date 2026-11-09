@@ -4,7 +4,7 @@ One tooling repo, two CI front ends. A user runs a pipeline **manually**, says w
 
 1. clones the API repo that holds the profile,
 2. runs the profile with [k6](https://k6.io) in Docker,
-3. archives the HTML dashboard report,
+3. archives the performance report (`report.html`),
 4. emails the report with a clear result (`PASSED` or `FAILED`, plus a message when the SLA was missed).
 
 Use **Azure DevOps** or **Jenkins**, whichever your team has. Both run the same engine, the same auth modules, the same email script and the same result rules.
@@ -33,9 +33,9 @@ Run with parameters
   -> checkout this tooling repo
   -> clone the API repo (apiRepoUrl)
   -> copy k6-engine-script.js + auth/ next to the profile
-  -> ci/run-k6.sh : grafana/k6 in Docker -> report.html, exit code
-  -> archive report.html (Azure: artifact "StressTestReport", Jenkins: build artifact)
-  -> archive results.json (Azure: artifact "StressTestResults", Jenkins: build artifact) = per-endpoint and overall numbers, see "results.json" below
+  -> ci/run-k6.sh : grafana/k6 in Docker -> k6-dashboard.html + results.json (internal inputs, not published), exit code
+  -> report/build_report.py : results.json + the time series in k6-dashboard.html -> report.html, see "Custom report" below
+  -> archive report.html (Azure: artifact "StressTestReport", Jenkins: build artifact). It is the only output, and the only email attachment
   -> ci/status.sh + send-email.py : email the report
   -> final check: decide the build result from the k6 exit code
 ```
@@ -91,9 +91,9 @@ The same exit code can have several causes (108 covers both rejected credentials
 Wording rule: say what was observed ("the API answered HTTP 401"), then what to check, and never claim a cause that was not observed. For example a 401 is reported as "credentials or token not accepted", not as "wrong password".
 
 
-### results.json: the data for reports
+### results.json: the data behind the report (internal, not published)
 
-The k6 dashboard (`report.html`) only holds overall numbers. The engine therefore also writes `results.json` (schema `perf-results/1`) at the end of every run, including aborted ones. It contains no headers, payloads, credentials or query strings.
+The k6 dashboard export (`k6-dashboard.html`) only holds overall numbers. The engine therefore also writes `results.json` (schema `perf-results/1`) at the end of every run, including aborted ones. It contains no headers, payloads, credentials or query strings.
 
 | Section | Content |
 |---|---|
@@ -104,7 +104,28 @@ The k6 dashboard (`report.html`) only holds overall numbers. The engine therefor
 | `endpoints[]` | per endpoint: label, method, URL, expected status, `status` (OK / PARTIAL / NO_SUCCESS / NOT_RUN), requests, ok, failed, no response, success and error rate, req/s, **status code counts**, and latency twice: `latencyOk` (requests that returned an expected status, use it for SLAs) and `latencyAll` |
 | `engineVerdict` | endpoints that never succeeded (the build result also depends on k6's exit code) |
 
-Notes: status code counts are exact for the codes 200, 201, 202, 204, 301, 302, 304, 400, 401, 403, 404, 405, 408, 409, 415, 422, 429, 500, 502, 503, 504 and the endpoint's own `expectedStatus` values; anything else is counted under `other` (`badStatusRange` gives its min and max). The charts in `report.html` use a 5 s step (`K6_DASHBOARD_PERIOD`, k6's default is 10 s). The same per-endpoint metrics (`epN_*`) are inside that report, so a custom report can also read the time series from it.
+Notes: status code counts are exact for the codes 200, 201, 202, 204, 301, 302, 304, 400, 401, 403, 404, 405, 408, 409, 415, 422, 429, 500, 502, 503, 504 and the endpoint's own `expectedStatus` values; anything else is counted under `other` (`badStatusRange` gives its min and max). The time series use a 5 s step (`K6_DASHBOARD_PERIOD`, k6's default is 10 s). The same per-endpoint metrics (`epN_*`) are inside `k6-dashboard.html`, which is where the report reads the time series from.
+
+### The report (report.html)
+
+`report/build_report.py` turns `results.json` (numbers) and the dashboard export `k6-dashboard.html` (the time series, one point per 5 s window) into **one self-contained HTML file**, `report.html`: no external requests, so it opens offline and as an email attachment. It is the only file that is published and the only one attached to the email; `k6-dashboard.html` and `results.json` stay in the workspace as inputs. Python standard library only. It never fails the build: on a problem it prints a warning and the pipeline carries on.
+
+What the page shows, and why only this:
+
+| Block | Answers |
+|---|---|
+| Result banner | PASSED, PASSED - SLA missed, or FAILED, with the one-line reason |
+| **Endpoint drop-down** | scopes everything below to "All endpoints" or one endpoint (link to one: `report.html#ep=2`) |
+| Figures | requests, success rate, req/s, median, p95, p99, slowest (successful requests only) |
+| What stands out | plain-language findings: failing endpoints and their status codes, SLA thresholds missed, timeouts, "passed only because errors are fast", the slowest endpoint, a throughput-saturation hint |
+| Endpoints table (all view) | one row per endpoint, click to open it |
+| Response time over time | average, p95, p99 per window: does latency grow with load? |
+| Load and throughput | virtual users above requests per second, same time axis: where does throughput stop growing? |
+| Errors over time | only drawn when there are errors |
+| Distribution, status codes | percentile bars; every status code with its meaning, count and share |
+| SLA thresholds, time split (all view) | each k6 threshold with the observed value; server time vs connection set-up vs transfer |
+
+Design rules: one y-axis per chart (no dual axis), colours from a validated palette (light and dark, follows the OS or the Theme button), a Charts/Tables switch that shows the same data as tables, a crosshair that moves in all charts together, keyboard arrows on a focused chart. Open it locally: `python report/build_report.py --results results.json --dashboard k6-dashboard.html --out report.html`.
 
 ## 4. Credential contract (the part that must stay the same)
 
@@ -146,7 +167,7 @@ If a profile needs a value that was never supplied, or a variable that still hol
 4. **Job:** New Item -> Pipeline -> *Pipeline script from SCM* -> Git -> this repo, branch `*/main`, Script Path `Jenkinsfile`. The **first** run only registers the parameters and may fail validation; from the second run use **Build with Parameters**.
 5. Non-secret SMTP settings (`smtp.gmail.com`, `465`, `ssl`) are in the `environment` block of the `Jenkinsfile`.
 6. **Things to know:**
-   - Jenkins' default Content-Security-Policy blocks scripts in archived HTML, so the k6 dashboard does not render on the build page. Download it or open the email attachment. Do not weaken the CSP.
+   - Jenkins' default Content-Security-Policy blocks scripts in archived HTML, so the report does not render on the build page. Download it or open the email attachment. Do not weaken the CSP.
    - Builds are serialised (`disableConcurrentBuilds`) so two load tests do not distort each other.
    - The k6 image is `grafana/k6:latest`; pin it in the `environment` block once you have a tested version.
    - `debug=true` writes credentials and tokens to the console log. Jenkins masks bound credentials, not a token fetched at run time.
@@ -220,3 +241,18 @@ The profile lives in the API repo (`<apiName>/<profileName>`); the API repo need
 - Rotate any credential that was ever committed (it stays in git history).
 - Treat `debug=true` as sensitive (see section 2).
 - Track expiry of the OAuth client secret.
+
+## 12. Third-party software and licenses
+
+| Component | Role | License | Where it is stated |
+|---|---|---|---|
+| **[Grafana k6](https://github.com/grafana/k6)** | Generates the load and the measurements. Run as the official `grafana/k6` container image, unmodified, as a separate program. | **GNU AGPL-3.0** ([license text](https://github.com/grafana/k6/blob/master/LICENSE.md)) | Footer and "Test details" of `report.html` (with the exact k6 version of the run). Deliberately **not** in the email |
+| k6 web dashboard export (`k6-dashboard.html`) | k6's own dashboard file, used only as an input for the time series | part of k6 | Not published or attached |
+| Python standard library | `send-email.py`, `report/build_report.py` | PSF license | not shown |
+| Docker images `python:3.12-alpine` (Jenkins email and report step) | Runtime | their upstream licenses | not shown |
+
+How the k6 notice works: `ci/run-k6.sh` writes the first line of `k6 version` to `k6-version.txt`; `report/build_report.py` reads it and puts, for example, "Grafana k6 v1.4.2 ... licensed under the GNU AGPL-3.0" with links to the license and the source code into the report. The wording lives in `report/report-template.html` (search for `K6_LICENSE`). The email does not mention k6 or the license. If the version cannot be determined the notice is shown without it.
+
+`report.html` contains no k6 code and no third-party libraries: charts are drawn with plain JavaScript and SVG. Its links to the k6 documentation, license and source are the only external references, and they are ordinary links, not loaded resources.
+
+This section states facts about how the tooling uses k6. It is not legal advice: whether and how AGPL-3.0 affects your organisation (for example if k6 itself is ever modified, redistributed, or offered to others as a service) is a question for your compliance or legal team.

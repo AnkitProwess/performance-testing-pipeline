@@ -1,0 +1,615 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Performance report - __REPORT_TITLE__</title>
+<style>
+  /* Tokens: the validated reference palette (dataviz skill). Series slots 1-3 only; status colours are reserved for state. */
+  :root {
+    color-scheme: light;
+    --page: #f9f9f7; --surface: #fcfcfb; --ink: #0b0b0b; --ink2: #52514e; --muted: #898781;
+    --grid: #e1e0d9; --axis: #c3c2b7; --border: rgba(11,11,11,.10); --track: #eceae4; --wash: rgba(11,11,11,.04);
+    --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a;
+    --good: #0ca30c; --good-text: #006300; --warn: #fab219; --serious: #ec835a; --crit: #d03b3b;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) {
+      color-scheme: dark;
+      --page: #0d0d0d; --surface: #1a1a19; --ink: #f0efec; --ink2: #c3c2b7; --muted: #898781;
+      --grid: #2c2c2a; --axis: #383835; --border: rgba(255,255,255,.10); --track: #2c2c2a; --wash: rgba(255,255,255,.05);
+      --s1: #3987e5; --s2: #d95926; --s3: #199e70; --good-text: #0ca30c;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --page: #0d0d0d; --surface: #1a1a19; --ink: #f0efec; --ink2: #c3c2b7; --muted: #898781;
+    --grid: #2c2c2a; --axis: #383835; --border: rgba(255,255,255,.10); --track: #2c2c2a; --wash: rgba(255,255,255,.05);
+    --s1: #3987e5; --s2: #d95926; --s3: #199e70; --good-text: #0ca30c;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--page); color: var(--ink); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  .page { max-width: 1180px; margin: 0 auto; padding: 24px 16px 48px; }
+  h1 { font-size: 22px; margin: 0; font-weight: 650; }
+  h2 { font-size: 15px; margin: 0; font-weight: 650; }
+  .sub { color: var(--ink2); font-size: 13px; margin-top: 2px; }
+  .muted { color: var(--ink2); }
+  .head { display: flex; flex-wrap: wrap; gap: 12px; justify-content: space-between; align-items: flex-start; margin-bottom: 16px; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px 18px; margin-bottom: 14px; }
+  .card > header { display: flex; flex-wrap: wrap; gap: 6px 16px; justify-content: space-between; align-items: baseline; margin-bottom: 10px; }
+
+  .banner { display: flex; gap: 12px; align-items: flex-start; border-left: 4px solid var(--c); }
+  .banner .big { font-size: 16px; font-weight: 650; }
+  .ico { display: inline-flex; width: 18px; height: 18px; border-radius: 50%; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; color: #fff; background: var(--c); flex: none; }
+  .ico.warn, .ico.warning { color: #0b0b0b; }
+  .good { --c: var(--good); } .warn { --c: var(--warn); } .crit { --c: var(--crit); } .info { --c: var(--s1); } .serious { --c: var(--serious); }
+
+  .filters { display: flex; flex-wrap: wrap; gap: 12px 20px; align-items: center; position: sticky; top: 0; z-index: 5; background: var(--page); padding: 10px 0; margin-bottom: 4px; }
+  .filters label { font-size: 12px; color: var(--ink2); display: flex; align-items: center; gap: 8px; }
+  select, button { font: inherit; color: var(--ink); background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; }
+  select { min-width: 280px; max-width: 100%; }
+  button { cursor: pointer; }
+  .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  .seg button { border: 0; border-radius: 0; background: var(--surface); }
+  .seg button[aria-pressed="true"] { background: var(--ink); color: var(--surface); }
+  :focus-visible { outline: 2px solid var(--s1); outline-offset: 2px; }
+
+  .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(128px, 1fr)); gap: 10px; }
+  .kpi { background: var(--wash); border-radius: 8px; padding: 10px 12px; }
+  .kpi .l { font-size: 12px; color: var(--ink2); }
+  .kpi .v { font-size: 24px; font-weight: 650; letter-spacing: -.01em; margin-top: 2px; display: flex; align-items: center; gap: 8px; }
+  .kpi .n { font-size: 12px; color: var(--ink2); }
+  .caption { font-size: 12px; color: var(--ink2); margin-top: 8px; }
+
+  ul.obs { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+  ul.obs li { display: flex; gap: 10px; align-items: flex-start; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--grid); vertical-align: middle; }
+  th { font-size: 12px; font-weight: 600; color: var(--ink2); white-space: nowrap; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  tbody tr:last-child td { border-bottom: 0; }
+  tr.click { cursor: pointer; } tr.click:hover td { background: var(--wash); }
+  .tablewrap { overflow-x: auto; }
+  .chip { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; white-space: nowrap; }
+  .meth { font-size: 11px; font-weight: 650; border: 1px solid var(--axis); border-radius: 4px; padding: 0 5px; color: var(--ink2); margin-right: 6px; }
+  .linklike { border: 0; background: none; padding: 0; color: var(--ink); text-align: left; text-decoration: underline; text-decoration-color: var(--axis); text-underline-offset: 3px; }
+  .minibar { height: 4px; border-radius: 2px; background: var(--s1); margin-top: 4px; min-width: 2px; }
+  .url { word-break: break-all; font-size: 12px; color: var(--ink2); }
+
+  .legend { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 12px; color: var(--ink2); }
+  .legend .key, .tip .key { display: inline-block; width: 14px; height: 0; border-top: 2px solid var(--c); vertical-align: middle; margin-right: 6px; border-radius: 1px; }
+  .chartbox { position: relative; }
+  .chartbox svg { display: block; width: 100%; overflow: visible; }
+  .chartbox + .chartbox { margin-top: 8px; }
+  .strip-title { font-size: 12px; font-weight: 600; color: var(--ink2); margin: 10px 0 2px; }
+  .tip { position: absolute; pointer-events: none; z-index: 4; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; font-size: 12px; box-shadow: 0 4px 14px rgba(0,0,0,.14); white-space: nowrap; }
+  .tip .t { color: var(--ink2); margin-bottom: 4px; }
+  .tip .row { display: flex; gap: 14px; justify-content: space-between; align-items: center; }
+  .tip .row b { font-weight: 650; font-variant-numeric: tabular-nums; }
+  #gtip { position: fixed; z-index: 20; pointer-events: none; }
+  svg text { font: 11px system-ui, -apple-system, "Segoe UI", sans-serif; fill: var(--muted); }
+
+  .bars { display: grid; gap: 8px; }
+  .brow { display: grid; grid-template-columns: 64px 1fr; gap: 10px; align-items: center; font-size: 13px; }
+  .barea { display: flex; align-items: center; gap: 8px; }
+  .fill { height: 14px; width: calc((100% - 84px) * var(--k, 0)); min-width: 2px; background: var(--s1); border-radius: 0 4px 4px 0; }
+  .brow:hover .fill { filter: brightness(1.12); }
+  .val { font-variant-numeric: tabular-nums; font-weight: 600; white-space: nowrap; }
+  .seg8 { display: flex; gap: 2px; height: 8px; margin: 6px 0 10px; }
+  .seg8 span { border-radius: 4px; background: var(--c); min-width: 2px; }
+  .twocol { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 14px; }
+  .twocol > .card { margin-bottom: 0; }
+  details summary { cursor: pointer; font-weight: 600; }
+  dl.kv { display: grid; grid-template-columns: max-content 1fr; gap: 4px 18px; margin: 10px 0 0; font-size: 13px; }
+  dl.kv dt { color: var(--ink2); } dl.kv dd { margin: 0; word-break: break-word; }
+  footer { color: var(--ink2); font-size: 12px; margin-top: 18px; display: grid; gap: 4px; }
+  footer a, dd a { color: inherit; text-decoration-color: var(--axis); text-underline-offset: 3px; }
+  @media print { .filters { display: none; } .card { break-inside: avoid; } body { background: #fff; } }
+</style>
+</head>
+<body>
+<div class="page" id="app"></div>
+<div id="gtip" class="tip" hidden></div>
+<script id="payload" type="application/json">__REPORT_DATA__</script>
+<script>
+(function () {
+  "use strict";
+  var P = JSON.parse(document.getElementById('payload').textContent);
+  var R = P.results, S = P.series, M = P.meta || {};
+  var EPS = R.endpoints || [];
+  var run = R.run || {}, lat = R.latency || {};
+
+  /* ---------- small helpers (all text goes through textContent / createTextNode) ---------- */
+  function h(tag, attrs) {
+    var n = document.createElement(tag), kids = Array.prototype.slice.call(arguments, 2);
+    Object.keys(attrs || {}).forEach(function (k) {
+      var v = attrs[k]; if (v == null || v === false) return;
+      if (k === 'class') n.className = v; else if (k === 'style') n.style.cssText = v;
+      else if (k.slice(0, 2) === 'on') n.addEventListener(k.slice(2), v); else n.setAttribute(k, v === true ? '' : v);
+    });
+    (function add(list) { list.forEach(function (c) {
+      if (c == null || c === false) return;
+      if (Array.isArray(c)) return add(c);
+      n.appendChild(c.nodeType ? c : document.createTextNode(String(c)));
+    }); })(kids);
+    return n;
+  }
+  var SVGNS = 'http://www.w3.org/2000/svg';
+  function sv(tag, attrs) {
+    var n = document.createElementNS(SVGNS, tag);
+    Object.keys(attrs || {}).forEach(function (k) {
+      var v = attrs[k];
+      // theme colours are CSS variables; routing them through style works in every browser, presentation attributes do not always resolve var()
+      if ((k === 'fill' || k === 'stroke') && typeof v === 'string' && v.indexOf('var(') === 0) n.style.setProperty(k, v); else n.setAttribute(k, v);
+    });
+    for (var i = 2; i < arguments.length; i++) if (arguments[i] != null) n.appendChild(typeof arguments[i] === 'string' ? document.createTextNode(arguments[i]) : arguments[i]);
+    return n;
+  }
+  function isNum(v) { return typeof v === 'number' && isFinite(v); }
+  function fmtMs(v) {
+    if (!isNum(v)) return '–';
+    if (v >= 1000) { var s = v / 1000; return (s >= 100 ? s.toFixed(0) : s >= 10 ? s.toFixed(1) : s.toFixed(2)) + ' s'; }
+    return (v >= 100 ? v.toFixed(0) : v >= 10 ? v.toFixed(1) : v.toFixed(2)) + ' ms';
+  }
+  function fmtInt(v) { return isNum(v) ? Math.round(v).toLocaleString('en-US') : '–'; }
+  function fmtNum(v, d) { return isNum(v) ? v.toLocaleString('en-US', { maximumFractionDigits: d == null ? 2 : d }) : '–'; }
+  function fmtPct(rate) {
+    if (!isNum(rate)) return '–';
+    var p = rate * 100; return (p === 0 || p === 100 ? p.toFixed(0) : p < 1 ? p.toFixed(2) : p.toFixed(1)) + '%';
+  }
+  function fmtBytes(b) {
+    if (!isNum(b)) return '–';
+    var u = ['B', 'KB', 'MB', 'GB'], i = 0; while (b >= 1024 && i < u.length - 1) { b /= 1024; i++; }
+    return b.toFixed(i ? 1 : 0) + ' ' + u[i];
+  }
+  function fmtDur(sec) {
+    if (!isNum(sec)) return '–'; sec = Math.round(sec);
+    return sec < 60 ? sec + 's' : Math.floor(sec / 60) + 'm' + (sec % 60 ? ' ' + (sec % 60) + 's' : '');
+  }
+  function ext(url, text) { return h('a', { href: url, target: '_blank', rel: 'noopener noreferrer' }, text); }
+  var K6_DOCS = 'https://grafana.com/docs/k6/latest/', K6_REPO = 'https://github.com/grafana/k6', K6_LICENSE = 'https://github.com/grafana/k6/blob/master/LICENSE.md';
+  function pathOf(url) { try { var u = new URL(url); return u.pathname + (u.search || ''); } catch (e) { return url; } }
+  function shortLabel(e) { return /^[A-Z]+ https?:\/\//.test(e.label) ? e.method + ' ' + pathOf(e.url) : e.label; }
+  function epName(e) { return '#' + e.index + ' ' + shortLabel(e); }
+
+  var MEANING = { 200: 'OK', 201: 'Created', 202: 'Accepted', 204: 'No Content', 301: 'Moved Permanently', 302: 'Found', 304: 'Not Modified',
+    400: 'Bad Request', 401: 'Unauthorized', 403: 'Forbidden', 404: 'Not Found', 405: 'Method Not Allowed', 408: 'Request Timeout', 409: 'Conflict',
+    415: 'Unsupported Media Type', 422: 'Unprocessable Entity', 429: 'Too Many Requests', 500: 'Internal Server Error', 502: 'Bad Gateway',
+    503: 'Service Unavailable', 504: 'Gateway Timeout' };
+  var ICON = { good: '✓', warn: '!', crit: '✕', info: 'i', serious: '!' };
+  function icon(level) { return h('span', { class: 'ico ' + level, 'aria-hidden': 'true' }, ICON[level] || 'i'); }
+
+  /* ---------- global hover tooltip for bars and rows ---------- */
+  var gtip = document.getElementById('gtip');
+  function attachTip(node, textFn) {
+    function move(ev) {
+      gtip.hidden = false; gtip.replaceChildren(h('div', null, textFn()));
+      var x = ev.clientX + 14, y = ev.clientY + 14, w = gtip.offsetWidth;
+      if (x + w > window.innerWidth - 8) x = ev.clientX - w - 14;
+      gtip.style.left = Math.max(4, x) + 'px'; gtip.style.top = y + 'px';
+    }
+    node.addEventListener('pointermove', move);
+    node.addEventListener('pointerleave', function () { gtip.hidden = true; });
+    node.addEventListener('focus', function () { var r = node.getBoundingClientRect(); move({ clientX: r.left + 20, clientY: r.top }); });
+    node.addEventListener('blur', function () { gtip.hidden = true; });
+  }
+
+  /* ---------- scope: "all" or an endpoint index ---------- */
+  var state = { scope: 'all', view: 'charts' };
+  (function readHash() { var m = /ep=(\d+)/.exec(location.hash); if (m && EPS[Number(m[1]) - 1]) state.scope = Number(m[1]); })();
+
+  function sumOk() { return EPS.reduce(function (s, e) { return s + (e.ok || 0); }, 0); }
+  function scopeInfo(scope) {
+    if (scope === 'all') {
+      var okAll = sumOk(), total = run.requests || 0;
+      var okLat = lat.overallOk;
+      // which requests the response times describe: 'ok' = successful ones, 'errors' = nothing succeeded, 'mixed' = older results file without a separate success latency
+      var kind = okLat || okAll === total ? 'ok' : okAll === 0 ? 'errors' : 'mixed';
+      return { name: 'All endpoints', requests: total, ok: okAll, failed: total - okAll, noResponse: EPS.reduce(function (s, e) { return s + (e.noResponse || 0); }, 0),
+        successRate: total ? okAll / total : null, rps: run.requestsPerSec, lat: okLat || lat.overall, latKind: kind,
+        sr: S && S.all, e: null };
+    }
+    var e = EPS[scope - 1];
+    return { name: epName(e), requests: e.requests, ok: e.ok, failed: e.failed, noResponse: e.noResponse, successRate: e.successRate, rps: e.requestsPerSec,
+      lat: e.latencyOk || e.latencyAll, latKind: e.latencyOk ? 'ok' : 'errors', sr: S && S.endpoints && S.endpoints[String(e.index)], e: e };
+  }
+
+  /* ---------- result banner ---------- */
+  function bannerModel() {
+    var status = M.status, detail = M.detail || '';
+    var noSuccess = EPS.some(function (e) { return e.status === 'NO_SUCCESS'; });
+    var thrFail = (R.thresholds || []).some(function (t) { return !t.ok; });
+    if (!status) status = (run.stoppedEarly || noSuccess) ? 'FAILED' : 'PASSED';
+    var sla = /SLA MISSED/i.test(detail) || (!M.status && thrFail);
+    if (status === 'FAILED') return { level: 'crit', title: 'FAILED', detail: detail };
+    if (sla) return { level: 'warn', title: 'PASSED – SLA missed', detail: detail || 'The test ran, but one or more thresholds were not met.' };
+    return { level: 'good', title: 'PASSED', detail: detail || 'The test ran and all thresholds were met.' };
+  }
+
+  /* ---------- observations (rule based hints, each one is a plain sentence) ---------- */
+  function codesText(e) {
+    var parts = Object.keys(e.statusCodes || {}).map(function (c) { return (c === 'noResponse' ? 'no response' : c === 'other' ? 'other status' : 'HTTP ' + c) + ' ×' + fmtInt(e.statusCodes[c]); });
+    return parts.length ? 'Seen: ' + parts.join(', ') + '.' : '';
+  }
+  function thresholdObserved(t) {
+    var m = /^(avg|min|med|max|p\((\d+(?:\.\d+)?)\))\s*(<=|>=|<|>)\s*([\d.]+)$/.exec(t.rule), L = lat.overall;
+    if (t.metric === 'http_req_duration' && m && L) {
+      var key = m[1] === 'avg' ? 'avg' : m[1] === 'med' ? 'median' : m[1] === 'min' ? 'min' : m[1] === 'max' ? 'max' : { '90': 'p90', '95': 'p95', '99': 'p99' }[m[2]];
+      return key && isNum(L[key]) ? fmtMs(L[key]) : '–';
+    }
+    if (t.metric === 'http_req_failed' && isNum(run.failedRate)) return fmtPct(run.failedRate);
+    return '–';
+  }
+  function saturationHint(info) {
+    if (!S || !info.sr || !info.sr.rps) return null;
+    var vus = S.vus, rps = info.sr.rps, reqs = info.sr.requests;
+    var l = info.sr.latencyOk && info.sr.latencyOk.avg.some(isNum) ? info.sr.latencyOk.avg : info.sr.latency.avg;
+    var vals = vus.filter(isNum); if (vals.length < 5) return null;
+    var maxV = Math.max.apply(null, vals); if (maxV < 4) return null;
+    var early = vus.findIndex(function (v) { return isNum(v) && v >= 0.5 * maxV; }), peak = vus.indexOf(maxV);
+    if (early < 0 || peak <= early || !reqs[early] || !reqs[peak] || !isNum(l[early]) || !isNum(l[peak]) || !rps[early]) return null;
+    var bestRps = Math.max.apply(null, rps.slice(early).filter(isNum));
+    if (vus[peak] >= 1.4 * vus[early] && rps[peak] <= 1.15 * rps[early] && l[peak] >= 1.5 * l[early])
+      return 'Throughput stopped growing (' + rps[early].toFixed(1) + ' → ' + rps[peak].toFixed(1) + ' req/s) while virtual users rose ' + vus[early] + ' → ' + vus[peak] +
+        ' and average response time grew ' + (l[peak] / l[early]).toFixed(1) + '×. The API looks saturated at about ' + bestRps.toFixed(1) + ' req/s (a hint, not proof).';
+    return null;
+  }
+  function observations(scope, info) {
+    var out = [], add = function (level, text) { out.push({ level: level, text: text }); };
+    var eps = scope === 'all' ? EPS : [EPS[scope - 1]];
+    if (run.stoppedEarly) add('crit', 'The run was stopped early by the engine; the build log shows the reason.');
+    eps.forEach(function (e) {
+      if (e.status === 'NO_SUCCESS') add('crit', epName(e) + ' never returned the expected HTTP ' + e.expectedStatus.join(' or ') + '. ' + codesText(e));
+      else if (e.status === 'PARTIAL') add('warn', epName(e) + ': ' + fmtPct(e.errorRate) + ' of its requests did not return the expected status. ' + codesText(e));
+      else if (e.status === 'NOT_RUN') add('info', epName(e) + ' was not called.');
+      if (e.noResponse > 0 && e.status !== 'NO_SUCCESS') add('warn', epName(e) + ': ' + fmtInt(e.noResponse) + ' request(s) got no HTTP response (timeout or connection error).');
+    });
+    if (scope === 'all') {
+      var L = lat.overall;
+      if (L && L.max >= 59000) add('warn', 'At least one request waited about 60 s: k6’s default request timeout. The API did not answer in time.');
+      (R.thresholds || []).filter(function (t) { return !t.ok; }).forEach(function (t) {
+        add('warn', 'SLA not met: ' + t.metric + ' ' + t.rule + ' (observed ' + thresholdObserved(t) + ').');
+      });
+      var latThr = (R.thresholds || []).filter(function (t) { return t.metric === 'http_req_duration'; });
+      if (latThr.length && latThr.every(function (t) { return t.ok; }) && EPS.some(function (e) { return e.status === 'NO_SUCCESS'; }))
+        add('warn', 'The latency thresholds passed only because failed requests answer quickly. Treat them as not met until every endpoint succeeds.');
+      var timed = EPS.filter(function (e) { return e.latencyOk; }).sort(function (a, b) { return a.latencyOk.p95 - b.latencyOk.p95; });
+      if (timed.length >= 2) {
+        var fast = timed[0], slow = timed[timed.length - 1];
+        if (fast.latencyOk.p95 > 0 && slow.latencyOk.p95 / fast.latencyOk.p95 >= 2)
+          add('info', epName(slow) + ' is ' + (slow.latencyOk.p95 / fast.latencyOk.p95).toFixed(1) + '× slower than ' + epName(fast) + ' at p95 (' + fmtMs(slow.latencyOk.p95) + ' vs ' + fmtMs(fast.latencyOk.p95) + ').');
+      }
+    }
+    var sat = saturationHint(info); if (sat) add('warn', sat);
+    if (!out.some(function (o) { return o.level === 'crit' || o.level === 'warn'; })) {
+      add('good', scope === 'all' ? 'Every request on every endpoint returned the expected status.' : 'Every request returned the expected status.');
+      if (scope === 'all' && (R.thresholds || []).length && (R.thresholds || []).every(function (t) { return t.ok; })) add('good', 'All k6 thresholds were met.');
+    }
+    return out;
+  }
+
+  /* ---------- line charts: inline SVG, one y axis per chart, synced crosshair ---------- */
+  var charts = [];
+  function niceStep(raw) { var p = Math.pow(10, Math.floor(Math.log10(raw))), f = raw / p; return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 2.5 ? 2.5 : f <= 5 ? 5 : 10) * p; }
+  function lineChart(host, cfg) {
+    var H = cfg.height || 200, ml = 52, mr = 14, mt = 10, mb = 24;
+    var tip = h('div', { class: 'tip', hidden: true }); host.appendChild(tip);
+    var api = { idx: null }, svgEl = null, geo = null;
+    function draw() {
+      if (svgEl) svgEl.remove();
+      var W = Math.max(300, host.clientWidth), iw = W - ml - mr, ih = H - mt - mb, xs = cfg.x;
+      var xmax = Math.max(xs[xs.length - 1], 1), all = [];
+      cfg.series.forEach(function (s) { s.values.forEach(function (v) { if (isNum(v)) all.push(v); }); });
+      var vmax = all.length ? Math.max.apply(null, all) : 1; if (vmax <= 0) vmax = 1;
+      var step = niceStep(vmax / 4), ymax = step * Math.ceil(vmax / step);
+      var X = function (t) { return ml + t / xmax * iw; }, Y = function (v) { return mt + ih - v / ymax * ih; };
+      geo = { X: X, Y: Y, iw: iw, W: W };
+      var g = sv('svg', { viewBox: '0 0 ' + W + ' ' + H, role: 'img', tabindex: '0', 'aria-label': cfg.title + '. Use the left and right arrow keys to read values.', height: H });
+      for (var v = 0; v <= ymax + step / 100; v += step) {
+        g.appendChild(sv('line', { x1: ml, x2: W - mr, y1: Y(v), y2: Y(v), stroke: 'var(--grid)', 'stroke-width': 1 }));
+        g.appendChild(sv('text', { x: ml - 8, y: Y(v) + 4, 'text-anchor': 'end' }, cfg.tick(v)));
+      }
+      var xstep = [5, 10, 15, 30, 60, 120, 300, 600].filter(function (s) { return xmax / s <= 8; })[0] || 600;
+      for (var t = 0; t <= xmax + 0.01; t += xstep) g.appendChild(sv('text', { x: X(t), y: H - 6, 'text-anchor': t === 0 ? 'start' : 'middle' }, fmtDur(t)));
+      g.appendChild(sv('line', { x1: ml, x2: W - mr, y1: Y(0), y2: Y(0), stroke: 'var(--axis)', 'stroke-width': 1 }));
+      cfg.series.forEach(function (s) {
+        var d = '', pen = false, areaD = '', seg = [];
+        s.values.forEach(function (val, i) {
+          if (!isNum(val)) { pen = false; if (seg.length) { areaD += seg.join('') + 'L' + X(xs[i - 1]) + ' ' + Y(0) + 'Z'; seg = []; } return; }
+          var pt = X(xs[i]) + ' ' + Y(val);
+          d += (pen ? 'L' : 'M') + pt; pen = true;
+          seg.push((seg.length ? 'L' : 'M' + X(xs[i]) + ' ' + Y(0) + 'L') + pt);
+        });
+        if (seg.length) areaD += seg.join('') + 'L' + X(xs[xs.length - 1]) + ' ' + Y(0) + 'Z';
+        if (cfg.area) g.appendChild(sv('path', { d: areaD, fill: s.color, 'fill-opacity': 0.10, stroke: 'none' }));
+        g.appendChild(sv('path', { d: d, fill: 'none', stroke: s.color, 'stroke-width': 2, 'stroke-linejoin': 'round', 'stroke-linecap': 'round' }));
+        for (var j = s.values.length - 1; j >= 0; j--) if (isNum(s.values[j])) {
+          g.appendChild(sv('circle', { cx: X(xs[j]), cy: Y(s.values[j]), r: 4, fill: s.color, stroke: 'var(--surface)', 'stroke-width': 2 })); break;
+        }
+      });
+      var cur = sv('g', { visibility: 'hidden' });
+      cur.appendChild(sv('line', { class: 'cl', y1: mt, y2: Y(0), stroke: 'var(--ink2)', 'stroke-width': 1 }));
+      cfg.series.forEach(function (s) { cur.appendChild(sv('circle', { r: 4, fill: s.color, stroke: 'var(--surface)', 'stroke-width': 2 })); });
+      g.appendChild(cur);
+      var hit = sv('rect', { x: ml, y: 0, width: iw, height: H - mb + 4, fill: 'transparent' });
+      hit.addEventListener('pointermove', function (ev) {
+        var r = g.getBoundingClientRect(), px = (ev.clientX - r.left) / r.width * W, best = 0, bd = 1e9;
+        xs.forEach(function (x, i) { var dd = Math.abs(X(x) - px); if (dd < bd) { bd = dd; best = i; } });
+        charts.forEach(function (c) { c.setCursor(best, c === api); });
+      });
+      hit.addEventListener('pointerleave', function () { charts.forEach(function (c) { c.setCursor(null, false); }); });
+      g.addEventListener('keydown', function (ev) {
+        if (ev.key !== 'ArrowLeft' && ev.key !== 'ArrowRight') return; ev.preventDefault();
+        var n = xs.length, i = api.idx == null ? (ev.key === 'ArrowRight' ? 0 : n - 1) : Math.min(n - 1, Math.max(0, api.idx + (ev.key === 'ArrowRight' ? 1 : -1)));
+        charts.forEach(function (c) { c.setCursor(i, c === api); });
+      });
+      g.addEventListener('blur', function () { charts.forEach(function (c) { c.setCursor(null, false); }); });
+      g.appendChild(hit); host.insertBefore(g, tip); svgEl = g; api.cur = cur;
+      if (api.idx != null) api.setCursor(api.idx, api.primary);
+    }
+    api.setCursor = function (i, primary) {
+      api.idx = i; api.primary = primary; if (!svgEl) return;
+      if (i == null) { api.cur.setAttribute('visibility', 'hidden'); tip.hidden = true; return; }
+      var x = geo.X(cfg.x[i]);
+      api.cur.setAttribute('visibility', 'visible');
+      api.cur.firstChild.setAttribute('x1', x); api.cur.firstChild.setAttribute('x2', x);
+      cfg.series.forEach(function (s, k) {
+        var c = api.cur.childNodes[k + 1], v = s.values[i];
+        if (isNum(v)) { c.setAttribute('cx', x); c.setAttribute('cy', geo.Y(v)); c.setAttribute('visibility', 'visible'); } else c.setAttribute('visibility', 'hidden');
+      });
+      if (!primary) { tip.hidden = true; return; }
+      tip.replaceChildren.apply(tip, [h('div', { class: 't' }, 'At ' + fmtDur(cfg.x[i]) + ' (window of ' + fmtDur(cfg.period) + ')')].concat(
+        cfg.series.map(function (s) { return h('div', { class: 'row', style: '--c:' + s.color }, h('span', null, h('i', { class: 'key' }), s.label), h('b', null, isNum(s.values[i]) ? cfg.fmt(s.values[i]) : '–')); })));
+      tip.hidden = false;
+      var w = tip.offsetWidth; tip.style.top = (mt + 4) + 'px';
+      tip.style.left = Math.max(4, x > geo.W / 2 ? x - w - 14 : x + 14) + 'px';
+    };
+    api.draw = draw; charts.push(api); draw();
+    return api;
+  }
+
+  function legend(series) {
+    return series.length < 2 ? null : h('div', { class: 'legend' }, series.map(function (s) { return h('span', { style: '--c:' + s.color }, h('i', { class: 'key' }), s.label); }));
+  }
+  function dataTable(cols, rows) {
+    return h('div', { class: 'tablewrap' }, h('table', null,
+      h('thead', null, h('tr', null, cols.map(function (c, i) { return h('th', { class: i ? 'num' : '' }, c); }))),
+      h('tbody', null, rows.map(function (r) { return h('tr', null, r.map(function (c, i) { return h('td', { class: i ? 'num' : '' }, c); })); }))));
+  }
+  function seriesCard(title, sub, series, x, fmt, tick, opts) {
+    opts = opts || {};
+    var card = h('div', { class: 'card' }, h('header', null, h('h2', null, title), sub ? h('span', { class: 'sub' }, sub) : null));
+    var lg = legend(series); if (lg && state.view === 'charts') card.appendChild(lg);
+    if (state.view === 'tables') {
+      card.appendChild(dataTable(['Time'].concat(series.map(function (s) { return s.label; })), x.map(function (t, i) {
+        return [fmtDur(t)].concat(series.map(function (s) { return isNum(s.values[i]) ? fmt(s.values[i]) : '–'; }));
+      })));
+    } else {
+      var box = h('div', { class: 'chartbox' }); card.appendChild(box);
+      pending.push(function () { lineChart(box, { title: title, x: x, period: S.period, series: series, fmt: fmt, tick: tick, height: opts.height || 220, area: opts.area }); });
+    }
+    return card;
+  }
+  var pending = [];
+
+  /* ---------- sections ---------- */
+  function kpis(info) {
+    var sr = info.successRate, lvl = sr == null ? 'info' : sr >= 1 ? 'good' : sr > 0 ? 'warn' : 'crit', L = info.lat;
+    function tile(label, value, note, ic) { return h('div', { class: 'kpi' }, h('div', { class: 'l' }, label), h('div', { class: 'v' }, value, ic || null), note ? h('div', { class: 'n' }, note) : null); }
+    return h('section', { class: 'card' },
+      h('header', null, h('h2', null, info.name), h('span', { class: 'sub' }, info.e ? info.e.method + ' ' + info.e.url : EPS.length + ' endpoint' + (EPS.length === 1 ? '' : 's'))),
+      h('div', { class: 'kpis' },
+        tile('Requests', fmtInt(info.requests), info.e ? 'expects HTTP ' + info.e.expectedStatus.join(' or ') : null),
+        tile('Success rate', fmtPct(sr), fmtInt(info.failed) + ' failed', icon(lvl)),
+        tile('Throughput', fmtNum(info.rps, 1) + ' /s', 'requests per second'),
+        tile('Median', L ? fmtMs(L.median) : '–', L ? 'avg ' + fmtMs(L.avg) : null),
+        tile('p95', L ? fmtMs(L.p95) : '–', '95% were faster'),
+        tile('p99', L ? fmtMs(L.p99) : '–', '99% were faster'),
+        tile('Slowest', L ? fmtMs(L.max) : '–', L ? 'fastest ' + fmtMs(L.min) : null)),
+      h('div', { class: 'caption' }, !L ? 'No request got a response, so there is no response time.'
+        : info.latKind === 'ok' ? 'Response times cover successful requests only (fast error pages would flatter them).'
+        : info.latKind === 'mixed' ? 'These response times include error responses (this results file predates the separate success latency).'
+        : 'No request succeeded: the response times shown belong to error responses and say nothing about real performance.'));
+  }
+  function obsCard(list) {
+    return h('section', { class: 'card' }, h('header', null, h('h2', null, 'What stands out')),
+      h('ul', { class: 'obs' }, list.map(function (o) { return h('li', { style: '--c:var(--' + (o.level === 'info' ? 's1' : o.level) + ')' }, icon(o.level), h('span', null, o.text)); })));
+  }
+  function resultChip(e) {
+    var map = { OK: ['good', 'OK'], PARTIAL: ['warn', 'Partly failing'], NO_SUCCESS: ['crit', 'Failing'], NOT_RUN: ['info', 'Not called'] }, m = map[e.status] || ['info', e.status];
+    return h('span', { class: 'chip', style: '--c:var(--' + (m[0] === 'info' ? 's1' : m[0]) + ')' }, icon(m[0]), m[1]);
+  }
+  function compareCard() {
+    var max = Math.max.apply(null, EPS.map(function (e) { return e.latencyOk ? e.latencyOk.p95 : 0; }).concat([1]));
+    var rows = EPS.map(function (e) {
+      var L = e.latencyOk || e.latencyAll;
+      return h('tr', { class: 'click', onclick: function () { select(e.index); } },
+        h('td', null, h('span', { class: 'meth' }, e.method), h('button', { class: 'linklike', 'aria-label': 'Show endpoint ' + e.index }, '#' + e.index + ' ' + pathOf(e.url))),
+        h('td', null, resultChip(e)),
+        h('td', { class: 'num' }, fmtInt(e.requests)), h('td', { class: 'num' }, fmtPct(e.successRate)), h('td', { class: 'num' }, fmtNum(e.requestsPerSec, 1)),
+        h('td', { class: 'num' }, L ? fmtMs(L.median) : '–'),
+        h('td', { class: 'num' }, L ? fmtMs(L.p95) : '–', e.latencyOk ? h('div', { class: 'minibar', style: 'width:' + Math.max(2, e.latencyOk.p95 / max * 100) + '%' }) : null),
+        h('td', { class: 'num' }, L ? fmtMs(L.p99) : '–'), h('td', { class: 'num' }, L ? fmtMs(L.max) : '–'));
+    });
+    return h('section', { class: 'card' }, h('header', null, h('h2', null, 'Endpoints'), h('span', { class: 'sub' }, 'Click a row to open that endpoint. Latency of successful requests; of error responses where none succeeded.')),
+      h('div', { class: 'tablewrap' }, h('table', null,
+        h('thead', null, h('tr', null, ['Endpoint', 'Result', 'Requests', 'Success', 'Req/s', 'Median', 'p95', 'p99', 'Slowest'].map(function (c, i) { return h('th', { class: i > 1 ? 'num' : '' }, c); }))),
+        h('tbody', null, rows))));
+  }
+  function distCard(info) {
+    var L = info.lat, card = h('section', { class: 'card' }, h('header', null, h('h2', null, 'Response-time distribution'),
+      h('span', { class: 'sub' }, 'p95 = 95% of requests were faster than this' + (info.latKind === 'ok' ? '' : info.latKind === 'mixed' ? ' (includes error responses)' : ' (error responses only)'))));
+    if (!L) { card.appendChild(h('div', { class: 'muted' }, 'Nothing to show: no request got a response.')); return card; }
+    var items = [['Median', L.median], ['p90', L.p90], ['p95', L.p95], ['p99', L.p99], ['Slowest', L.max]];
+    if (state.view === 'tables') { card.appendChild(dataTable(['Percentile', 'Response time'], items.map(function (i) { return [i[0], fmtMs(i[1])]; }))); return card; }
+    var max = Math.max.apply(null, items.map(function (i) { return i[1] || 0; }).concat([1]));
+    card.appendChild(h('div', { class: 'bars' }, items.map(function (i) {
+      var row = h('div', { class: 'brow', tabindex: '0' }, h('span', { class: 'muted' }, i[0]),
+        h('div', { class: 'barea' }, h('div', { class: 'fill', style: '--k:' + (i[1] / max) }), h('span', { class: 'val' }, fmtMs(i[1]))));
+      attachTip(row, function () { return i[0] + ': ' + fmtMs(i[1]) + (isNum(i[1]) && i[1] >= 1000 ? ' (' + fmtNum(i[1], 0) + ' ms)' : ''); });
+      return row;
+    })));
+    return card;
+  }
+  function codeCard(scope, info) {
+    var rows = [];
+    (scope === 'all' ? EPS : [EPS[scope - 1]]).forEach(function (e) {
+      Object.keys(e.statusCodes || {}).sort(function (a, b) { return (Number(a) || 1e9) - (Number(b) || 1e9); }).forEach(function (code) {
+        var numeric = /^\d+$/.test(code), n = e.statusCodes[code], expected = numeric && e.expectedStatus.indexOf(Number(code)) >= 0, lv, word, name;
+        if (expected) { lv = 'good'; word = 'Expected'; } else if (code === 'noResponse') { lv = 'crit'; word = 'No response'; }
+        else if (numeric && Number(code) >= 500) { lv = 'crit'; word = 'Server error'; } else if (numeric && Number(code) >= 400) { lv = 'serious'; word = 'Client error'; }
+        else { lv = 'warn'; word = 'Unexpected'; }
+        name = numeric ? code + ' ' + (MEANING[code] || '') : code === 'noResponse' ? 'Timeout / connection error'
+          : 'Other status' + (e.badStatusRange ? ' (' + e.badStatusRange.min + (e.badStatusRange.max !== e.badStatusRange.min ? '–' + e.badStatusRange.max : '') + ')' : '');
+        rows.push({ ep: e, name: name, n: n, lv: lv, word: word });
+      });
+    });
+    var card = h('section', { class: 'card' }, h('header', null, h('h2', null, 'HTTP status codes')));
+    if (!rows.length) { card.appendChild(h('div', { class: 'muted' }, 'No responses recorded.')); return card; }
+    var total = info.requests || 1;
+    var cols = (scope === 'all' ? ['Endpoint'] : []).concat(['Status', 'Meaning', 'Requests', 'Share']);
+    card.appendChild(h('div', { class: 'tablewrap' }, h('table', null,
+      h('thead', null, h('tr', null, cols.map(function (c, i) { return h('th', { class: i >= cols.length - 2 ? 'num' : '' }, c); }))),
+      h('tbody', null, rows.map(function (r) {
+        return h('tr', null, scope === 'all' ? h('td', null, '#' + r.ep.index) : null,
+          h('td', null, h('span', { class: 'chip', style: '--c:var(--' + r.lv + ')' }, icon(r.lv === 'serious' ? 'warn' : r.lv), r.name)),
+          h('td', null, r.word), h('td', { class: 'num' }, fmtInt(r.n)),
+          h('td', { class: 'num' }, fmtPct(r.n / total), state.view === 'charts' ? h('div', { class: 'minibar', style: 'width:' + Math.max(2, r.n / total * 100) + '%; background:var(--' + r.lv + ')' }) : null));
+      })))));
+    return card;
+  }
+  function timeCards(info) {
+    var sr = info.sr;
+    if (!S || !sr) return [h('section', { class: 'card' }, h('header', null, h('h2', null, 'Over time')),
+      h('div', { class: 'muted' }, !S ? 'The time series is not available: the k6 dashboard export was not found for this run.' : 'This run has no time series for this endpoint (it was produced by an older engine).'))];
+    var hasOk = sr.latencyOk && sr.latencyOk.avg.some(isNum), L = hasOk ? sr.latencyOk : sr.latency, x = S.t;
+    var latNote = hasOk || info.latKind === 'ok' ? 'successful requests, per ' + fmtDur(S.period) + ' window'
+      : info.latKind === 'mixed' ? 'includes error responses, per ' + fmtDur(S.period) + ' window' : 'error responses only: no request succeeded';
+    var list = [];
+    if (L.avg.some(isNum)) {
+      list.push(seriesCard('Response time over time', latNote,
+        [{ label: 'Average', color: 'var(--s1)', values: L.avg }, { label: 'p95', color: 'var(--s2)', values: L.p95 }, { label: 'p99', color: 'var(--s3)', values: L.p99 }], x, fmtMs,
+        function (v) { return v === 0 ? '0' : v >= 1000 ? fmtNum(v / 1000, 1) + ' s' : fmtNum(v, 0) + ' ms'; }, { height: 240 }));
+    }
+    var load = h('div', { class: 'card' }, h('header', null, h('h2', null, 'Load and throughput'), h('span', { class: 'sub' }, 'when throughput stops rising while users keep rising, the API is saturated')));
+    if (state.view === 'tables') {
+      load.appendChild(dataTable(['Time', 'Virtual users', 'Requests/s'], x.map(function (t, i) { return [fmtDur(t), fmtInt(S.vus[i]), fmtNum(sr.rps[i], 1)]; })));
+    } else {
+      var b1 = h('div', { class: 'chartbox' }), b2 = h('div', { class: 'chartbox' });
+      load.appendChild(h('div', { class: 'strip-title' }, 'Virtual users')); load.appendChild(b1);
+      load.appendChild(h('div', { class: 'strip-title' }, info.e ? 'Requests per second (this endpoint)' : 'Requests per second')); load.appendChild(b2);
+      pending.push(function () {
+        lineChart(b1, { title: 'Virtual users over time', x: x, period: S.period, series: [{ label: 'Virtual users', color: 'var(--muted)', values: S.vus }], fmt: fmtInt, tick: fmtInt, height: 110, area: true });
+        lineChart(b2, { title: 'Requests per second over time', x: x, period: S.period, series: [{ label: 'Requests/s', color: 'var(--s1)', values: sr.rps }], fmt: function (v) { return fmtNum(v, 1) + ' /s'; }, tick: function (v) { return fmtNum(v, 1); }, height: 130, area: true });
+      });
+    }
+    list.push(load);
+    if (sr.errorPct.some(function (v) { return isNum(v) && v > 0; })) {
+      list.push(seriesCard('Errors over time', 'share of requests that did not return the expected status',
+        [{ label: 'Error rate', color: 'var(--crit)', values: sr.errorPct }], x, function (v) { return fmtNum(v, 1) + '%'; }, function (v) { return fmtNum(v, 0) + '%'; }, { height: 130, area: true }));
+    } else list.push(h('div', { class: 'card' }, h('div', { class: 'chip', style: '--c:var(--good)' }, icon('good'), 'No errors in any ' + fmtDur(S.period) + ' window.')));
+    return list;
+  }
+  function thresholdCard() {
+    var rows = (R.thresholds || []).map(function (t) {
+      return h('tr', null, h('td', null, t.metric), h('td', null, t.rule), h('td', { class: 'num' }, thresholdObserved(t)),
+        h('td', null, h('span', { class: 'chip', style: '--c:var(' + (t.ok ? '--good' : '--crit') + ')' }, icon(t.ok ? 'good' : 'crit'), t.ok ? 'Met' : 'Not met')));
+    });
+    if (!rows.length) return null;
+    return h('section', { class: 'card' }, h('header', null, h('h2', null, 'SLA thresholds'), h('span', { class: 'sub' }, 'k6 evaluates these on all endpoints together and on every response, errors included')),
+      h('div', { class: 'tablewrap' }, h('table', null, h('thead', null, h('tr', null, ['Metric', 'Rule', 'Observed', 'Result'].map(function (c, i) { return h('th', { class: i === 2 ? 'num' : '' }, c); }))), h('tbody', null, rows))));
+  }
+  function timeSplitCard() {
+    var b = lat.breakdown || {};
+    if (!b.waiting) return null;
+    var parts = [{ n: 'Waiting for the server (TTFB)', v: b.waiting.avg, c: 'var(--s1)' }, { n: 'Connection set-up (blocked, incl. TLS)', v: b.blocked ? b.blocked.avg : 0, c: 'var(--s2)' },
+      { n: 'Sending and receiving data', v: (b.sending ? b.sending.avg : 0) + (b.receiving ? b.receiving.avg : 0), c: 'var(--s3)' }];
+    var total = parts.reduce(function (s, p) { return s + (p.v || 0); }, 0) || 1;
+    var card = h('section', { class: 'card' }, h('header', null, h('h2', null, 'Where the time goes'), h('span', { class: 'sub' }, 'average per request, all endpoints')));
+    if (state.view === 'charts') {
+      var bar = h('div', { class: 'seg8', role: 'img', 'aria-label': 'Share of the average request time' }, parts.map(function (p) { var s = h('span', { style: '--c:' + p.c + ';flex:' + Math.max(p.v / total, 0.004) }); attachTip(s, function () { return p.n + ': ' + fmtMs(p.v) + ' (' + fmtPct(p.v / total) + ')'; }); return s; }));
+      card.appendChild(bar);
+    }
+    card.appendChild(h('div', { class: 'tablewrap' }, h('table', null, h('tbody', null, parts.map(function (p) {
+      return h('tr', null, h('td', null, h('span', { class: 'chip', style: '--c:' + p.c }, h('i', { style: 'display:inline-block;width:10px;height:10px;border-radius:2px;background:' + p.c }), p.n)), h('td', { class: 'num' }, fmtMs(p.v)), h('td', { class: 'num' }, fmtPct(p.v / total)));
+    })))));
+    card.appendChild(h('div', { class: 'caption' }, 'A large server share points at the API; a large connection share at the network or at connection reuse. Connection set-up mostly hits the first request of each virtual user.'));
+    return card;
+  }
+  function configCard() {
+    var P2 = R.profile || {}, stages = (P2.stages || []).map(function (s, i) { return (i + 1) + '. ' + s.duration + ' → ' + s.target + ' virtual users'; });
+    var thr = P2.thresholds ? Object.keys(P2.thresholds).map(function (k) { return k + ': ' + P2.thresholds[k].join(', '); }) : [];
+    function kv(k, v) { return [h('dt', null, k), h('dd', null, v)]; }
+    return h('details', { class: 'card' }, h('summary', null, 'Test details'),
+      h('dl', { class: 'kv' },
+        kv('API', (P2.apiName || '–') + (P2.artifactVersion ? ' (version ' + P2.artifactVersion + ')' : '')),
+        kv('Load shape', stages.length ? h('span', null, stages.map(function (s) { return h('div', null, s); })) : '–'),
+        kv('Thresholds', thr.length ? h('span', null, thr.map(function (s) { return h('div', null, s); })) : 'k6 defaults'),
+        kv('Authentication', (P2.authTypes || []).length ? P2.authTypes.join(', ') : 'none managed by the engine'),
+        kv('Duration', fmtDur(run.durationSec)), kv('Peak virtual users', fmtInt(run.vusMax)), kv('Iterations', fmtInt(run.iterations) + ' (' + fmtNum(run.iterationsPerSec, 2) + ' /s)'),
+        kv('Data', fmtBytes(run.dataReceivedBytes) + ' received, ' + fmtBytes(run.dataSentBytes) + ' sent'),
+        kv('Checks passed', fmtPct(run.checksPassRate)),
+        M.exitCode !== '' && M.exitCode != null ? kv('k6 exit code', M.exitCode + ' (0 passed, 99 thresholds crossed, 108 test could not run)') : null,
+        M.buildUrl ? kv('Build', h('a', { href: M.buildUrl, rel: 'noopener' }, 'open the CI build')) : null,
+        kv('Load-testing tool', h('span', null, ext(K6_DOCS, 'Grafana k6'), M.k6Version ? ' ' + M.k6Version : '', ' – open-source load-testing tool by Grafana Labs')),
+        kv('k6 license', h('span', null, 'GNU Affero General Public License v3.0 (AGPL-3.0). ', ext(K6_LICENSE, 'License text'), ' · ', ext(K6_REPO, 'Source code'))),
+        kv('How k6 is used', 'The official, unmodified grafana/k6 container image is run as a separate program. This report is produced by the pipeline’s own tooling from k6’s measurements and contains no k6 source code.'),
+        kv('Names', 'k6 is a Grafana Labs project. The name is used only to identify the tool; this report is not affiliated with or endorsed by Grafana Labs.'),
+        kv('Generated', R.generatedAt ? new Date(R.generatedAt).toLocaleString() : '–')));
+  }
+
+  /* ---------- page ---------- */
+  var app = document.getElementById('app'), main = h('main');
+  function select(scope) { state.scope = scope; history.replaceState(null, '', scope === 'all' ? location.pathname + location.search : '#ep=' + scope); sync(); renderMain(); window.scrollTo({ top: 0 }); }
+  var sel, segCharts, segTables;
+  function sync() {
+    sel.value = String(state.scope);
+    segCharts.setAttribute('aria-pressed', String(state.view === 'charts')); segTables.setAttribute('aria-pressed', String(state.view === 'tables'));
+  }
+  function renderMain() {
+    charts.length = 0; pending.length = 0; main.replaceChildren(); gtip.hidden = true;
+    var info = scopeInfo(state.scope), body = [];
+    body.push(kpis(info), obsCard(observations(state.scope, info)));
+    if (state.scope === 'all' && EPS.length > 1) body.push(compareCard());
+    body = body.concat(timeCards(info));
+    var two = h('div', { class: 'twocol' }, distCard(info), codeCard(state.scope, info));
+    body.push(two);
+    if (state.scope === 'all') { var th = thresholdCard(), ts = timeSplitCard(); if (th) body.push(th); if (ts) body.push(ts); }
+    else body.push(h('div', { class: 'caption' }, 'SLA thresholds and the time split are measured for all endpoints together: choose “All endpoints” to see them.'));
+    body.push(configCard());
+    body.forEach(function (n) { if (n) main.appendChild(n); });
+    pending.forEach(function (fn) { fn(); });
+  }
+  function build() {
+    var b = bannerModel(), P2 = R.profile || {};
+    var head = h('div', { class: 'head' },
+      h('div', null, h('h1', null, 'Performance test report'),
+        h('div', { class: 'sub' }, [P2.apiName, P2.artifactVersion ? 'version ' + P2.artifactVersion : null, R.generatedAt ? new Date(R.generatedAt).toLocaleString() : null,
+          isNum(run.durationSec) ? fmtDur(run.durationSec) + ' test, up to ' + fmtInt(run.vusMax) + ' virtual users' : null].filter(Boolean).join(' · '))),
+      h('button', { onclick: function () {
+        var root = document.documentElement, cur = root.getAttribute('data-theme'), next = cur === 'dark' ? 'light' : cur === 'light' ? null : 'dark';
+        if (next) root.setAttribute('data-theme', next); else root.removeAttribute('data-theme');
+        charts.forEach(function (c) { c.draw(); }); this.textContent = 'Theme: ' + (next || 'auto');
+      } }, 'Theme: auto'));
+    var banner = h('section', { class: 'card banner', style: '--c:var(--' + b.level + ')' }, icon(b.level), h('div', null, h('div', { class: 'big' }, b.title), h('div', { class: 'muted' }, b.detail)));
+    sel = h('select', { id: 'ep', onchange: function () { select(this.value === 'all' ? 'all' : Number(this.value)); } },
+      h('option', { value: 'all' }, 'All endpoints (' + EPS.length + ')'),
+      EPS.map(function (e) { return h('option', { value: String(e.index) }, epName(e) + (e.status === 'OK' ? '' : e.status === 'NO_SUCCESS' ? '  ✕ failing' : e.status === 'PARTIAL' ? '  ! errors' : '')); }));
+    segCharts = h('button', { onclick: function () { state.view = 'charts'; sync(); renderMain(); } }, 'Charts');
+    segTables = h('button', { onclick: function () { state.view = 'tables'; sync(); renderMain(); } }, 'Tables');
+    var filters = h('div', { class: 'filters', role: 'group', 'aria-label': 'Report filters' },
+      h('label', null, 'Endpoint', sel), h('label', null, 'View', h('span', { class: 'seg' }, segCharts, segTables)));
+    app.appendChild(head); app.appendChild(banner); app.appendChild(filters); app.appendChild(main);
+    app.appendChild(h('footer', null,
+      h('div', null, 'Load generated with ', ext(K6_DOCS, 'Grafana k6'), M.k6Version ? ' ' + M.k6Version : '', ', open-source software by Grafana Labs, licensed under the ', ext(K6_LICENSE, 'GNU AGPL-3.0'), '. ', ext(K6_REPO, 'Source code'), '.'),
+      h('div', null, 'Report generated by the performance pipeline · data schema ' + (R.schema || 'unknown') + (S ? '' : ' · no time series'))));
+    sync(); renderMain();
+  }
+  var timer; window.addEventListener('resize', function () { clearTimeout(timer); timer = setTimeout(function () { charts.forEach(function (c) { c.draw(); }); }, 120); });
+  window.addEventListener('hashchange', function () { var m = /ep=(\d+)/.exec(location.hash); state.scope = m && EPS[Number(m[1]) - 1] ? Number(m[1]) : 'all'; sync(); renderMain(); });
+  try { build(); } catch (err) { app.appendChild(h('pre', { style: 'white-space:pre-wrap;color:var(--crit)' }, 'The report could not be drawn: ' + err.message)); }
+})();
+</script>
+</body>
+</html>

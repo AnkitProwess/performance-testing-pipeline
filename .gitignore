@@ -3,3 +3,5 @@ report.html
 results.json
 sample-api 4/
 progress.md
+report/__pycache__/
+k6-dashboard.html

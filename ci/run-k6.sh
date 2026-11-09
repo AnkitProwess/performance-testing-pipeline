@@ -7,7 +7,10 @@
 #   profile path   e.g. AI_innovation_poc1/load-profile3.json
 #   debug          "true" adds k6 --http-debug=full (writes headers, incl. credentials, to the log)
 # Optional env: K6_IMAGE (default grafana/k6); K6_DASHBOARD_PERIOD (time between points in the dashboard charts, default 5s; k6's own default is 10s)
-# Also writes <api-repo-dir>/results.json (engine's handleSummary): per-endpoint and overall metrics, the input for the custom report.
+# Also writes <api-repo-dir>/k6-version.txt (first line of "k6 version").
+# Also writes, as INPUTS for report/build_report.py (the only output that is published is the report.html that script builds):
+#   <api-repo-dir>/k6-dashboard.html  k6's own dashboard export (holds the time series)
+#   <api-repo-dir>/results.json       the engine's handleSummary(): per-endpoint and overall metrics
 #
 # Credentials are read from the environment (set by the CI tool) and passed to the container by NAME only,
 # never as values on the command line. A name that is not set on the host is simply not passed on.
@@ -41,19 +44,23 @@ fi
 
 docker pull -q "$K6_IMAGE" > /dev/null || echo "Could not pull $K6_IMAGE, using the local copy if present."
 
+# The exact k6 version of this run, shown in the custom report's licence notice (k6 is AGPL-3.0 software). A failure here must never stop the test.
+rm -f "$API_DIR/k6-version.txt"
+docker run --rm "$K6_IMAGE" version 2>/dev/null | head -n 1 > "$API_DIR/k6-version.txt" || true
+
 # The engine logs one line "PERF_REASON|<CODE>|<text>" just before it stops a run (see auth/common.js, emitReason). The output is copied to a
 # temporary file (outside the workspace, deleted below) so the FIRST such line can be kept in k6-reason.txt for ci/status.sh and the email.
 REASON_FILE="$API_DIR/k6-reason.txt"
 VERDICT_FILE="$API_DIR/k6-verdict.txt"   # written by the engine's handleSummary(): empty = every endpoint succeeded at least once
-RESULTS_FILE="$API_DIR/results.json"     # written by the engine's handleSummary(): per-endpoint and overall numbers for the custom report (kept as a build artifact)
-rm -f "$REASON_FILE" "$VERDICT_FILE" "$RESULTS_FILE"
+RESULTS_FILE="$API_DIR/results.json"     # written by the engine's handleSummary(): per-endpoint and overall numbers, input of the custom report (not published)
+rm -f "$REASON_FILE" "$VERDICT_FILE" "$RESULTS_FILE" "$API_DIR/k6-dashboard.html" "$API_DIR/report.html"
 K6_LOG="$(mktemp)"
 
 docker run --rm \
   --user "$(id -u):$(id -g)" \
   -v "$API_DIR:/apps" \
   -e K6_WEB_DASHBOARD=true \
-  -e K6_WEB_DASHBOARD_EXPORT=/apps/report.html \
+  -e K6_WEB_DASHBOARD_EXPORT=/apps/k6-dashboard.html \
   -e K6_WEB_DASHBOARD_PERIOD="${K6_DASHBOARD_PERIOD:-5s}" \
   -e LOAD_PROFILE_PATH="/apps/$PROFILE_REL"   -e K6_VERDICT_FILE=/apps/k6-verdict.txt   -e K6_RESULTS_FILE=/apps/results.json \
   "${ENV_ARGS[@]}" \

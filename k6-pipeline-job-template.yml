@@ -101,23 +101,26 @@ jobs:
           BASIC_USERNAME: $(BASIC_USERNAME)
           BASIC_PASSWORD: $(BASIC_PASSWORD)
 
-      # 4. Publish the HTML Dashboard Report to Build Artifacts (no report exists when k6 failed before the load started)
+      # 3b. Build the report (report.html) from results.json + the time series in k6's dashboard export (k6-dashboard.html). Never fails the build.
+      - script: |
+          CI_DIR="$(Pipeline.Workspace)/s/master-pipeline-repo/ci"
+          REASON_FILE="$(Pipeline.Workspace)/s/api-repo/k6-reason.txt"
+          STATUS=$(sh "$CI_DIR/status.sh" "$K6_EXIT_CODE")
+          DETAIL=$(sh "$CI_DIR/status.sh" "$K6_EXIT_CODE" detail "$REASON_FILE")
+          python $(Pipeline.Workspace)/s/master-pipeline-repo/report/build_report.py             --results "$(Pipeline.Workspace)/s/api-repo/results.json"             --dashboard "$(Pipeline.Workspace)/s/api-repo/k6-dashboard.html"             --out "$(Pipeline.Workspace)/s/api-repo/report.html"             --status "$STATUS"             --detail "$DETAIL"             --exit-code "$K6_EXIT_CODE"             --build-url "$(System.TeamFoundationCollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId)"
+        displayName: 'Build Performance Report'
+        condition: succeededOrFailed()
+        continueOnError: true
+        env:
+          K6_EXIT_CODE: $(K6_EXIT_CODE)
+
+      # 4. Publish report.html (the report built in step 3b) to Build Artifacts (no report exists when k6 failed before the load started)
       - task: PublishBuildArtifacts@1
         inputs:
           PathtoPublish: '$(Pipeline.Workspace)/s/api-repo/report.html'
           ArtifactName: 'StressTestReport'
           publishLocation: 'Container'
         displayName: 'Archive Test Report HTML'
-        condition: succeededOrFailed()
-        continueOnError: true
-
-      # 4b. Publish results.json (per-endpoint and overall numbers written by the engine; input for the custom report)
-      - task: PublishBuildArtifacts@1
-        inputs:
-          PathtoPublish: '$(Pipeline.Workspace)/s/api-repo/results.json'
-          ArtifactName: 'StressTestResults'
-          publishLocation: 'Container'
-        displayName: 'Archive Test Results JSON'
         condition: succeededOrFailed()
         continueOnError: true
 
