@@ -83,18 +83,34 @@ function endpointLabel(ep) {
     return ep.name || `${(ep.method || 'GET').toUpperCase()} ${String(ep.endpoint).split('?')[0]}`;
 }
 
-// Per-endpoint results, so one endpoint failing while another passes is visible (summary below, k6-verdict.txt, and the checks in the report).
-// Metric names are index-based because they must be plain identifiers.
+// Per-endpoint results, so one endpoint failing while another passes is visible (console summary, results.json, k6-verdict.txt, and the checks in the report).
+// k6 only keeps per-tag metrics that a threshold names, and VUs cannot share JavaScript variables, so everything that must be summed across VUs
+// has to be a k6 metric created here. Metric names are index-based (ep1_, ep2_ ...) because they must be plain identifiers.
+//   epN_requests / epN_ok / epN_no_response   counts
+//   epN_http_<code>                           one counter per status code in TRACKED_STATUSES (+ the endpoint's expected codes); epN_http_other for the rest
+//   epN_duration                              response time (ms) of every request that got an HTTP response
+//   epN_ok_duration                           response time (ms) of the requests that returned an expected status (the latency an SLA should use)
+//   epN_bad_status                            trend of the unexpected statuses (min / max show which codes came back, also for codes not tracked above)
+const TRACKED_STATUSES = [200, 201, 202, 204, 301, 302, 304, 400, 401, 403, 404, 405, 408, 409, 415, 422, 429, 500, 502, 503, 504];
 const endpointStats = new Map();
 (config.endpoints || []).forEach((ep, i) => {
     const n = i + 1;
+    const expected = expectedList(ep);
+    const statusCodes = Array.from(new Set(TRACKED_STATUSES.concat(expected.filter((c) => Number.isInteger(c) && c >= 100 && c <= 599))));
+    const statusCounters = new Map();
+    statusCodes.forEach((code) => statusCounters.set(code, new Counter(`ep${n}_http_${code}`)));
     endpointStats.set(ep, {
         label: endpointLabel(ep),
-        expected: expectedList(ep),
+        expected: expected,
         requests: new Counter(`ep${n}_requests`),
         ok: new Counter(`ep${n}_ok`),
         noResponse: new Counter(`ep${n}_no_response`),
         badStatus: new Trend(`ep${n}_bad_status`), // only unexpected HTTP statuses; min / max show which codes came back
+        statusCodes: statusCodes,
+        statusCounters: statusCounters,
+        otherStatus: new Counter(`ep${n}_http_other`),
+        duration: new Trend(`ep${n}_duration`, true),
+        okDuration: new Trend(`ep${n}_ok_duration`, true),
     });
 });
 
@@ -176,6 +192,14 @@ function checkResponse(res, ep) {
     } else {
         stats.badStatus.add(res.status);
     }
+    if (res.status !== 0) {
+        // Latency only exists when the server answered; a failed connection would pollute it with the time to fail.
+        (stats.statusCounters.get(res.status) || stats.otherStatus).add(1);
+        stats.duration.add(res.timings.duration);
+        if (ok) {
+            stats.okDuration.add(res.timings.duration);
+        }
+    }
 
     // Rejected credentials make the whole run meaningless (every request is turned away), and as a threshold miss it would pass for an SLA miss (exit 99).
     // A profile that deliberately expects 401/403 is left alone.
@@ -192,22 +216,51 @@ function checkResponse(res, ep) {
     }
 }
 
-// Runs once at the end of the test (also after an abort). Replaces k6's default console summary with one that lists every endpoint, and writes
-// the verdict file that ci/run-k6.sh reads: when an endpoint NEVER returned its expected status although the API answered (wrong URL, 409 conflict,
-// 400 bad body, 5xx ...), the run is still fully reported but must not be called a pass. An endpoint that only partly fails is left to the thresholds.
+// ---- helpers for handleSummary ----
+const round = (v, digits) => (typeof v === 'number' && isFinite(v) ? Math.round(v * 10 ** digits) / 10 ** digits : null);
+
+// k6 Trend values -> the numbers a report needs (milliseconds). null when the metric has no samples.
+function trendOf(metric) {
+    const v = metric && metric.values;
+    if (!v || typeof v.avg !== 'number') {
+        return null;
+    }
+    return { avg: round(v.avg, 2), min: round(v.min, 2), median: round(v.med, 2), p90: round(v['p(90)'], 2), p95: round(v['p(95)'], 2), p99: round(v['p(99)'], 2), max: round(v.max, 2) };
+}
+
+// Names only (never parameters): which authentication types the profile uses
+function authTypesUsed() {
+    const types = new Set();
+    for (const t of [config.authType].concat((config.endpoints || []).map((ep) => ep.authType))) {
+        if (t && t !== 'NONE') {
+            types.add(t);
+        }
+    }
+    return Array.from(types);
+}
+
+const ms = (v) => (typeof v === 'number' ? v.toFixed(0) : 'n/a');
+
+// Runs once at the end of the test (also after an abort). It
+//  - prints a console summary that lists every endpoint,
+//  - writes results.json (K6_RESULTS_FILE): all numbers a custom report needs, per endpoint and overall. No headers, payloads, credentials or query strings.
+//  - writes the verdict file that ci/run-k6.sh reads: when an endpoint NEVER returned its expected status although the API answered (wrong URL, 409 conflict,
+//    400 bad body, 5xx ...), the run is still fully reported but must not be called a pass. An endpoint that only partly fails is left to the thresholds.
 export function handleSummary(data) {
-    const count = (name) => (data.metrics[name] && data.metrics[name].values.count) || 0;
+    const metrics = data.metrics || {};
+    const values = (name) => (metrics[name] && metrics[name].values) || {};
+    const count = (name) => values(name).count || 0;
     const lines = ['', '==== Performance test summary ===='];
     const problems = [];
 
-    const failed = data.metrics.http_req_failed && data.metrics.http_req_failed.values;
-    const duration = data.metrics.http_req_duration && data.metrics.http_req_duration.values;
+    const failed = metrics.http_req_failed && metrics.http_req_failed.values;
+    const duration = metrics.http_req_duration && metrics.http_req_duration.values;
     lines.push(`requests: ${count('http_reqs')}, failed (unexpected status): ${failed ? (failed.rate * 100).toFixed(2) : 'n/a'}%`);
     if (duration) {
-        const ms = (v) => (typeof v === 'number' ? v.toFixed(0) : 'n/a');
         lines.push(`latency ms: avg ${ms(duration.avg)}, p90 ${ms(duration['p(90)'])}, p95 ${ms(duration['p(95)'])}, p99 ${ms(duration['p(99)'])}, max ${ms(duration.max)}`);
     }
 
+    const endpointResults = [];
     lines.push('', 'Endpoints:');
     let index = 0;
     for (const ep of config.endpoints || []) {
@@ -216,15 +269,56 @@ export function handleSummary(data) {
         const requests = count(`ep${index}_requests`);
         const okCount = count(`ep${index}_ok`);
         const noResponse = count(`ep${index}_no_response`);
-        const bad = data.metrics[`ep${index}_bad_status`] && data.metrics[`ep${index}_bad_status`].values;
+        const answered = requests - noResponse; // requests that got an HTTP response
+        const bad = values(`ep${index}_bad_status`);
         const expected = stats.expected.join(' or ');
-        const badText = bad && bad.count > 0 ? `HTTP ${bad.min === bad.max ? bad.min : bad.min + '-' + bad.max}` : '';
+        const badText = bad.count > 0 ? `HTTP ${bad.min === bad.max ? bad.min : bad.min + '-' + bad.max}` : '';
+        const latencyAll = answered > 0 ? trendOf(metrics[`ep${index}_duration`]) : null;
+        const latencyOk = okCount > 0 ? trendOf(metrics[`ep${index}_ok_duration`]) : null;
+
+        const statusCodes = {};
+        for (const code of stats.statusCodes) {
+            const n = count(`ep${index}_http_${code}`);
+            if (n > 0) {
+                statusCodes[code] = n;
+            }
+        }
+        if (count(`ep${index}_http_other`) > 0) {
+            statusCodes.other = count(`ep${index}_http_other`); // a code outside the tracked list; badStatusRange below shows which
+        }
+        if (noResponse > 0) {
+            statusCodes.noResponse = noResponse;
+        }
+
+        endpointResults.push({
+            index: index,
+            label: stats.label,
+            method: (ep.method || 'GET').toUpperCase(),
+            url: String(ep.endpoint).split('?')[0],
+            expectedStatus: stats.expected,
+            status: requests === 0 ? 'NOT_RUN' : okCount === 0 ? 'NO_SUCCESS' : okCount < requests ? 'PARTIAL' : 'OK',
+            requests: requests,
+            ok: okCount,
+            failed: requests - okCount,
+            noResponse: noResponse,
+            successRate: requests > 0 ? round(okCount / requests, 4) : null,
+            errorRate: requests > 0 ? round((requests - okCount) / requests, 4) : null,
+            requestsPerSec: round(values(`ep${index}_requests`).rate, 2),
+            statusCodes: statusCodes,
+            badStatusRange: bad.count > 0 ? { min: bad.min, max: bad.max } : null,
+            latencyOk: latencyOk,   // response time of the requests that returned an expected status: use this for SLAs
+            latencyAll: latencyAll, // response time of every request that got an answer (an error page is usually faster)
+        });
+
         let detail = '';
         if (badText) {
             detail += `, ${badText} x${bad.count}`;
         }
         if (noResponse > 0) {
             detail += `, no response x${noResponse}`;
+        }
+        if (latencyOk) {
+            detail += `, latency(ok) avg ${ms(latencyOk.avg)} p95 ${ms(latencyOk.p95)} p99 ${ms(latencyOk.p99)} ms`;
         }
         lines.push(`  ${okCount > 0 || requests === 0 ? 'OK  ' : 'FAIL'} ${stats.label}: ${requests} requests, ${okCount} returned ${expected}${detail}`);
         if (requests > 0 && okCount === 0) {
@@ -235,10 +329,13 @@ export function handleSummary(data) {
     }
 
     lines.push('', 'Thresholds:');
-    for (const name of Object.keys(data.metrics)) {
-        const thresholds = data.metrics[name].thresholds || {};
+    const thresholdResults = [];
+    for (const name of Object.keys(metrics)) {
+        const thresholds = metrics[name].thresholds || {};
         for (const rule of Object.keys(thresholds)) {
-            lines.push(`  ${thresholds[rule] && thresholds[rule].ok === false ? 'FAIL' : 'OK  '} ${name}: ${rule}`);
+            const ok = !(thresholds[rule] && thresholds[rule].ok === false);
+            thresholdResults.push({ metric: name, rule: rule, ok: ok });
+            lines.push(`  ${ok ? 'OK  ' : 'FAIL'} ${name}: ${rule}`);
         }
     }
 
@@ -251,8 +348,52 @@ export function handleSummary(data) {
     }
     lines.push('');
 
+    const httpReqs = values('http_reqs');
+    const testDurationMs = data.state && typeof data.state.testRunDurationMs === 'number' ? data.state.testRunDurationMs : null;
+    const results = {
+        schema: 'perf-results/1',
+        generatedAt: new Date().toISOString(),
+        profile: {
+            apiName: config.apiName || null,
+            artifactVersion: config.artifact_version || null,
+            authTypes: authTypesUsed(),
+            stages: config.stages || null,
+            thresholds: options.thresholds,
+        },
+        run: {
+            durationSec: round(testDurationMs !== null ? testDurationMs / 1000 : (httpReqs.rate ? httpReqs.count / httpReqs.rate : null), 2),
+            stoppedEarly: count('perf_stopped_early') > 0,
+            vusMax: values('vus_max').max !== undefined ? values('vus_max').max : null,
+            requests: count('http_reqs'),
+            requestsPerSec: round(httpReqs.rate, 2),
+            iterations: count('iterations'),
+            iterationsPerSec: round(values('iterations').rate, 2),
+            failedRate: failed ? round(failed.rate, 4) : null,
+            checksPassRate: metrics.checks ? round(values('checks').rate, 4) : null,
+            dataReceivedBytes: count('data_received'),
+            dataSentBytes: count('data_sent'),
+        },
+        latency: {
+            overall: trendOf(metrics.http_req_duration),
+            iteration: trendOf(metrics.iteration_duration),
+            // where the time goes: waiting = server think time (TTFB); blocked / connecting / tlsHandshaking mostly occur on the first request of each VU
+            breakdown: {
+                blocked: trendOf(metrics.http_req_blocked),
+                connecting: trendOf(metrics.http_req_connecting),
+                tlsHandshaking: trendOf(metrics.http_req_tls_handshaking),
+                sending: trendOf(metrics.http_req_sending),
+                waiting: trendOf(metrics.http_req_waiting),
+                receiving: trendOf(metrics.http_req_receiving),
+            },
+        },
+        thresholds: thresholdResults,
+        endpoints: endpointResults,
+        engineVerdict: { problems: problems }, // the build result also depends on k6's exit code; the CI scripts combine both
+    };
+
     const out = { stdout: lines.join('\n') };
     out[__ENV.K6_VERDICT_FILE || '/apps/k6-verdict.txt'] = verdict; // empty file = every endpoint succeeded at least once
+    out[__ENV.K6_RESULTS_FILE || '/apps/results.json'] = JSON.stringify(results, null, 2);
     return out;
 }
 

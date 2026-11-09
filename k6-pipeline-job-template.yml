@@ -1,7 +1,10 @@
 parameters:
   - name: reportRecipient
     type: string
-    default: 'ankit.kumar@prowesssoft.com'
+    default: 'iankit7667@gmail.com,ankit.kumar@prowesssoft.com'
+  - name: reportCc
+    type: string
+    default: '' # optional Cc, comma separated
   - name: apiRepoUrl
     type: string
     default: '' # Defaults to empty for imported CI/CD mode
@@ -108,6 +111,16 @@ jobs:
         condition: succeededOrFailed()
         continueOnError: true
 
+      # 4b. Publish results.json (per-endpoint and overall numbers written by the engine; input for the custom report)
+      - task: PublishBuildArtifacts@1
+        inputs:
+          PathtoPublish: '$(Pipeline.Workspace)/s/api-repo/results.json'
+          ArtifactName: 'StressTestResults'
+          publishLocation: 'Container'
+        displayName: 'Archive Test Results JSON'
+        condition: succeededOrFailed()
+        continueOnError: true
+
       # 5. Execute the SMTP email delivery using the Python utility script
       - script: |
           API_NAME="${{ parameters.apiName }}"
@@ -130,7 +143,7 @@ jobs:
           echo "Sending report email for $HOST_PROFILE_PATH, status: $STATUS"
 
           # apiName / artifact_version for the subject are read from the profile by send-email.py (--profile)
-          python $(Pipeline.Workspace)/s/master-pipeline-repo/send-email.py             --to "${{ parameters.reportRecipient }}"             --profile "$HOST_PROFILE_PATH"             --status "$STATUS"             --detail "$DETAIL"             --report "$(Pipeline.Workspace)/s/api-repo/report.html"             --build-url "$(System.TeamFoundationCollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId)"
+          python $(Pipeline.Workspace)/s/master-pipeline-repo/send-email.py             --to "${{ parameters.reportRecipient }}"             --cc "${{ parameters.reportCc }}"             --profile "$HOST_PROFILE_PATH"             --status "$STATUS"             --detail "$DETAIL"             --report "$(Pipeline.Workspace)/s/api-repo/report.html"             --build-url "$(System.TeamFoundationCollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId)"
         displayName: 'Email Stress Test Report'
         condition: succeededOrFailed()
         env:

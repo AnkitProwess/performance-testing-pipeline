@@ -35,6 +35,7 @@ Run with parameters
   -> copy k6-engine-script.js + auth/ next to the profile
   -> ci/run-k6.sh : grafana/k6 in Docker -> report.html, exit code
   -> archive report.html (Azure: artifact "StressTestReport", Jenkins: build artifact)
+  -> archive results.json (Azure: artifact "StressTestResults", Jenkins: build artifact) = per-endpoint and overall numbers, see "results.json" below
   -> ci/status.sh + send-email.py : email the report
   -> final check: decide the build result from the k6 exit code
 ```
@@ -46,7 +47,8 @@ Run parameters (same names in both tools):
 | `apiRepoUrl` | Git URL of the repo that holds the profile (default: `https://github.com/AnkitProwess/sample-api.git`) |
 | `apiName` | Folder in the API repo, case-sensitive (empty = repo root). **Not** the `apiName` label inside the JSON. |
 | `profileName` | JSON file name inside that folder, e.g. `load-profile3.json` |
-| `reportRecipient` | Who receives the email (comma or semicolon separated) |
+| `reportRecipient` | Who receives the email, comma or semicolon separated (default: `iankit7667@gmail.com` and `ankit.kumar@prowesssoft.com`) |
+| `reportCc` | Optional Cc addresses, comma or semicolon separated. Empty by default (no Cc). An address already in `reportRecipient` is not repeated. |
 | `debug` | `true` adds `k6 --http-debug=full`. It writes request headers, **including credentials and tokens**, to the log. Use only when needed. |
 | Jenkins only: `apiRepoBranch`, `apiRepoCredentialsId` | Branch to clone (default `main`); credentials ID for a private API repo |
 
@@ -88,6 +90,21 @@ The same exit code can have several causes (108 covers both rejected credentials
 
 Wording rule: say what was observed ("the API answered HTTP 401"), then what to check, and never claim a cause that was not observed. For example a 401 is reported as "credentials or token not accepted", not as "wrong password".
 
+
+### results.json: the data for reports
+
+The k6 dashboard (`report.html`) only holds overall numbers. The engine therefore also writes `results.json` (schema `perf-results/1`) at the end of every run, including aborted ones. It contains no headers, payloads, credentials or query strings.
+
+| Section | Content |
+|---|---|
+| `profile` | apiName, artifact version, auth type names, stages, thresholds |
+| `run` | duration, peak VUs, requests and req/s, iterations, failed rate, checks pass rate, bytes sent/received, `stoppedEarly` |
+| `latency` | overall and iteration latency (avg, min, median, p90, p95, p99, max, in ms) and the timing breakdown (blocked, connecting, TLS, sending, waiting = server time, receiving) |
+| `thresholds` | every k6 threshold with `ok` true/false |
+| `endpoints[]` | per endpoint: label, method, URL, expected status, `status` (OK / PARTIAL / NO_SUCCESS / NOT_RUN), requests, ok, failed, no response, success and error rate, req/s, **status code counts**, and latency twice: `latencyOk` (requests that returned an expected status, use it for SLAs) and `latencyAll` |
+| `engineVerdict` | endpoints that never succeeded (the build result also depends on k6's exit code) |
+
+Notes: status code counts are exact for the codes 200, 201, 202, 204, 301, 302, 304, 400, 401, 403, 404, 405, 408, 409, 415, 422, 429, 500, 502, 503, 504 and the endpoint's own `expectedStatus` values; anything else is counted under `other` (`badStatusRange` gives its min and max). The charts in `report.html` use a 5 s step (`K6_DASHBOARD_PERIOD`, k6's default is 10 s). The same per-endpoint metrics (`epN_*`) are inside that report, so a custom report can also read the time series from it.
 
 ## 4. Credential contract (the part that must stay the same)
 
@@ -183,7 +200,7 @@ The profile lives in the API repo (`<apiName>/<profileName>`); the API repo need
 
 ## 9. Email
 
-`send-email.py` sends the report over SMTP (implicit SSL for port 465 or `SMTP_TLS=ssl`, otherwise STARTTLS). The subject is `[RESULT] Performance Test Report - <apiName> - Version <artifact_version>`, with the values read from the profile. Recipients are `reportRecipient` plus `MANDATORY_RECIPIENTS` if defined (none by default). A delivery failure never hides the test result: Azure logs it and carries on, Jenkins marks the build UNSTABLE.
+`send-email.py` sends the report over SMTP (implicit SSL for port 465 or `SMTP_TLS=ssl`, otherwise STARTTLS). The subject is `[RESULT] Performance Test Report - <apiName> - Version <artifact_version>`, with the values read from the profile. Recipients are `reportRecipient` plus `MANDATORY_RECIPIENTS` if defined (none by default); `reportCc` (empty by default) goes into the Cc header. A delivery failure never hides the test result: Azure logs it and carries on, Jenkins marks the build UNSTABLE.
 
 ## 10. Troubleshooting
 

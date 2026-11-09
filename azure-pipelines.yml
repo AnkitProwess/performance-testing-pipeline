@@ -10,8 +10,12 @@ parameters:
     default: "https://github.com/AnkitProwess/sample-api.git"
   - name: reportRecipient
     type: string
-    displayName: "Email Report Recipient"
-    default: "ankit.kumar@prowesssoft.com"
+    displayName: "Email Report Recipient(s) (comma separated)"
+    default: "iankit7667@gmail.com,ankit.kumar@prowesssoft.com"
+  - name: reportCc
+    type: string
+    displayName: "Email Cc (optional, comma separated)"
+    default: ""
   - name: apiName
     type: string
     displayName: "API Name (folder name in the API repo, case-sensitive)"
@@ -33,6 +37,7 @@ stages:
         parameters:
           apiRepoUrl: ${{ parameters.apiRepoUrl }}
           reportRecipient: ${{ parameters.reportRecipient }}
+          reportCc: ${{ parameters.reportCc }}
           apiName: ${{ parameters.apiName }}
           profileName: ${{ parameters.profileName }}
           debug: ${{ parameters.debug }}

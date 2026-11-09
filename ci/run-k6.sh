@@ -6,7 +6,8 @@
 #   api-repo-dir   folder that holds the profile AND the copied k6-engine-script.js + auth/ (mounted as /apps)
 #   profile path   e.g. AI_innovation_poc1/load-profile3.json
 #   debug          "true" adds k6 --http-debug=full (writes headers, incl. credentials, to the log)
-# Optional env: K6_IMAGE (default grafana/k6)
+# Optional env: K6_IMAGE (default grafana/k6); K6_DASHBOARD_PERIOD (time between points in the dashboard charts, default 5s; k6's own default is 10s)
+# Also writes <api-repo-dir>/results.json (engine's handleSummary): per-endpoint and overall metrics, the input for the custom report.
 #
 # Credentials are read from the environment (set by the CI tool) and passed to the container by NAME only,
 # never as values on the command line. A name that is not set on the host is simply not passed on.
@@ -44,7 +45,8 @@ docker pull -q "$K6_IMAGE" > /dev/null || echo "Could not pull $K6_IMAGE, using 
 # temporary file (outside the workspace, deleted below) so the FIRST such line can be kept in k6-reason.txt for ci/status.sh and the email.
 REASON_FILE="$API_DIR/k6-reason.txt"
 VERDICT_FILE="$API_DIR/k6-verdict.txt"   # written by the engine's handleSummary(): empty = every endpoint succeeded at least once
-rm -f "$REASON_FILE" "$VERDICT_FILE"
+RESULTS_FILE="$API_DIR/results.json"     # written by the engine's handleSummary(): per-endpoint and overall numbers for the custom report (kept as a build artifact)
+rm -f "$REASON_FILE" "$VERDICT_FILE" "$RESULTS_FILE"
 K6_LOG="$(mktemp)"
 
 docker run --rm \
@@ -52,7 +54,8 @@ docker run --rm \
   -v "$API_DIR:/apps" \
   -e K6_WEB_DASHBOARD=true \
   -e K6_WEB_DASHBOARD_EXPORT=/apps/report.html \
-  -e LOAD_PROFILE_PATH="/apps/$PROFILE_REL"   -e K6_VERDICT_FILE=/apps/k6-verdict.txt \
+  -e K6_WEB_DASHBOARD_PERIOD="${K6_DASHBOARD_PERIOD:-5s}" \
+  -e LOAD_PROFILE_PATH="/apps/$PROFILE_REL"   -e K6_VERDICT_FILE=/apps/k6-verdict.txt   -e K6_RESULTS_FILE=/apps/results.json \
   "${ENV_ARGS[@]}" \
   "$K6_IMAGE" run "${K6_ARGS[@]}" /apps/k6-engine-script.js 2>&1 | tee "$K6_LOG"
 K6_EXIT=${PIPESTATUS[0]}

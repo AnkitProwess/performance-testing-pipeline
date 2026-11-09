@@ -63,7 +63,8 @@ pipeline {
         string(name: 'apiRepoCredentialsId', defaultValue: '', description: 'Jenkins credentials ID for a PRIVATE API repo (Username with password: any user + access token). Leave empty for a public repo')
         string(name: 'apiName', defaultValue: 'AI_innovation_poc1', description: 'API name = folder name in the API repo, case-sensitive (empty = repo root)')
         string(name: 'profileName', defaultValue: 'load-profile3.json', description: 'Profile name = JSON file name inside that folder')
-        string(name: 'reportRecipient', defaultValue: 'ankit.kumar@prowesssoft.com', description: 'Email report recipient(s), comma separated')
+        string(name: 'reportRecipient', defaultValue: 'iankit7667@gmail.com,ankit.kumar@prowesssoft.com', description: 'Email report recipient(s), comma separated')
+        string(name: 'reportCc', defaultValue: '', description: 'Optional Cc address(es), comma separated. Empty = no Cc')
         booleanParam(name: 'debug', defaultValue: false, description: 'Enable k6 HTTP debugging (writes request/response headers, including credentials and tokens, to the console log)')
     }
 
@@ -99,14 +100,21 @@ pipeline {
                     if (!(profileName ==~ /^[A-Za-z0-9_.-]+\.json$/) || profileName.contains('..')) {
                         error("profileName must be a plain JSON file name such as 'load-profile3.json': '${profileName}'")
                     }
+                    String cc = (params.reportCc ?: '').trim()
                     for (String address : recipients.split(/[,;]/)) {
                         if (address.trim() && !(address.trim() ==~ /^[^\s@]+@[^\s@]+\.[^\s@]+$/)) {
                             error("reportRecipient contains an invalid address: '${address.trim()}'")
                         }
                     }
+                    for (String address : cc.split(/[,;]/)) {
+                        if (address.trim() && !(address.trim() ==~ /^[^\s@]+@[^\s@]+\.[^\s@]+$/)) {
+                            error("reportCc contains an invalid address: '${address.trim()}'")
+                        }
+                    }
 
                     env.PROFILE_REL = apiName ? "${apiName}/${profileName}" : profileName // relative to the API repo root
                     env.REPORT_RECIPIENT = recipients.replace(';', ',')
+                    env.REPORT_CC = cc.replace(';', ',')
                     env.K6_HTTP_DEBUG = params.debug ? 'true' : 'false'
                     currentBuild.description = env.PROFILE_REL
                 }
@@ -174,7 +182,7 @@ pipeline {
 
         stage('Archive Report and Email') {
             steps {
-                archiveArtifacts artifacts: 'api-repo/report.html', allowEmptyArchive: true // no report exists when k6 failed before the load started
+                archiveArtifacts artifacts: 'api-repo/report.html,api-repo/results.json', allowEmptyArchive: true // neither exists when k6 failed before the load started
 
                 // A delivery problem must not hide the test result: mark the build UNSTABLE and carry on to the final check
                 catchError(buildResult: 'UNSTABLE', stageResult: 'UNSTABLE', message: 'Report email could not be sent') {
@@ -206,6 +214,7 @@ pipeline {
                                     -e BUILD_NUMBER \
                                     "$EMAIL_IMAGE" python /work/master-pipeline-repo/send-email.py \
                                         --to "$REPORT_RECIPIENT" \
+                                        --cc "$REPORT_CC" \
                                         --profile "/work/api-repo/$PROFILE_REL" \
                                         --status "$STATUS" \
                                         --detail "$DETAIL" \

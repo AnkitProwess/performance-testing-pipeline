@@ -21,10 +21,26 @@ def profile_labels(profile_path):
         print(f"[WARNING] Could not read apiName/artifact_version from {profile_path}: {e}", file=sys.stderr)
     return api_name, version
 
-def send_email(smtp_host, smtp_port, smtp_user, smtp_pass, smtp_from, to_email, subject, body_html, attachment_path=None, smtp_tls="false"):
+def split_addresses(value):
+    """Comma or semicolon separated list -> list of addresses (empty entries dropped)."""
+    return [a.strip() for a in (value or "").replace(";", ",").split(",") if a.strip()]
+
+def unique(addresses, exclude=()):
+    """Remove duplicates (case-insensitive), keeping order, and anything already in `exclude`."""
+    seen = {a.lower() for a in exclude}
+    result = []
+    for a in addresses:
+        if a.lower() not in seen:
+            seen.add(a.lower())
+            result.append(a)
+    return result
+
+def send_email(smtp_host, smtp_port, smtp_user, smtp_pass, smtp_from, to_email, subject, body_html, attachment_path=None, smtp_tls="false", cc_email=""):
     msg = MIMEMultipart()
     msg['From'] = smtp_from
     msg['To'] = to_email
+    if cc_email:
+        msg['Cc'] = cc_email
     msg['Subject'] = subject
 
     msg.attach(MIMEText(body_html, 'html'))
@@ -61,7 +77,8 @@ def send_email(smtp_host, smtp_port, smtp_user, smtp_pass, smtp_from, to_email, 
             
         server.login(smtp_user, smtp_pass)
         print("Logged in successfully. Sending email...")
-        recipients = [r.strip() for r in to_email.split(",") if r.strip()]
+        # The SMTP envelope carries To + Cc; the Cc header only makes the Cc recipients visible to everyone.
+        recipients = unique(split_addresses(to_email) + split_addresses(cc_email))
         server.sendmail(smtp_from, recipients, msg.as_string())
         server.quit()
         print("Email report sent successfully!")
@@ -72,7 +89,8 @@ def send_email(smtp_host, smtp_port, smtp_user, smtp_pass, smtp_from, to_email, 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Send performance test email report.")
-    parser.add_argument("--to", required=True, help="Recipient email")
+    parser.add_argument("--to", required=True, help="Recipient email(s), comma or semicolon separated")
+    parser.add_argument("--cc", default="", help="Optional Cc email(s), comma or semicolon separated (empty = no Cc)")
     parser.add_argument("--subject", default="", help="Email subject (built from --profile when omitted)")
     parser.add_argument("--profile", default="", help="Path to the load profile JSON; supplies apiName and artifact_version for the subject")
     parser.add_argument("--report", required=True, help="Path to the HTML report")
@@ -102,25 +120,21 @@ if __name__ == '__main__':
     if mandatory_to == "$(MANDATORY_RECIPIENTS)":
         mandatory_to = ""  # variable not defined in the variable group -> no mandatory recipients
     
-    recipient_list = []
-    if developer_to:
-        recipient_list.extend([email.strip() for email in developer_to.replace(";", ",").split(",") if email.strip()])
-    if mandatory_to:
-        recipient_list.extend([email.strip() for email in mandatory_to.replace(";", ",").split(",") if email.strip()])
-
     # Deduplicate keeping insertion order
-    final_recipients = []
-    for email in recipient_list:
-        if email not in final_recipients:
-            final_recipients.append(email)
+    final_recipients = unique(split_addresses(developer_to) + split_addresses(mandatory_to))
+    # Cc: an address that is already in To is not repeated
+    final_cc = unique(split_addresses(args.cc), exclude=final_recipients)
 
     to_emails = ", ".join(final_recipients)
-    
+    cc_emails = ", ".join(final_cc)
+
     if not to_emails:
         print("[WARNING] No recipient email addresses resolved. Skipping email transmission.")
         sys.exit(0)
 
     print(f"Final resolved recipients: {to_emails}")
+    if cc_emails:
+        print(f"Cc: {cc_emails}")
 
     base_subject = args.subject
     if not base_subject:
@@ -191,4 +205,4 @@ if __name__ == '__main__':
     </html>
     """
 
-    send_email(host, port, user, password, sender, to_emails, subject, html_content, args.report, smtp_tls)
+    send_email(host, port, user, password, sender, to_emails, subject, html_content, args.report, smtp_tls, cc_emails)
