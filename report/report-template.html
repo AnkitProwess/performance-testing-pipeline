@@ -5,111 +5,170 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Performance report - __REPORT_TITLE__</title>
 <style>
-  /* Tokens: the validated reference palette (dataviz skill). Series slots 1-3 only; status colours are reserved for state. */
+  /* Tokens. Series slots 1-3 come from the validated reference palette (dataviz skill); status colours are reserved for state, never for series. */
   :root {
     color-scheme: light;
-    --page: #f9f9f7; --surface: #fcfcfb; --ink: #0b0b0b; --ink2: #52514e; --muted: #898781;
-    --grid: #e1e0d9; --axis: #c3c2b7; --border: rgba(11,11,11,.10); --track: #eceae4; --wash: rgba(11,11,11,.04);
+    --page: #f3f5f9; --surface: #ffffff; --ink: #101828; --ink2: #475467; --muted: #6b7686;
+    --grid: #e9edf3; --axis: #cbd2dc; --border: #e3e8ef; --track: #edf1f6; --wash: #f5f7fa;
+    --shadow: 0 1px 2px rgba(16,24,40,.05), 0 6px 20px rgba(16,24,40,.06);
     --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a;
     --good: #0ca30c; --good-text: #006300; --warn: #fab219; --serious: #ec835a; --crit: #d03b3b;
   }
   @media (prefers-color-scheme: dark) {
     :root:where(:not([data-theme="light"])) {
       color-scheme: dark;
-      --page: #0d0d0d; --surface: #1a1a19; --ink: #f0efec; --ink2: #c3c2b7; --muted: #898781;
-      --grid: #2c2c2a; --axis: #383835; --border: rgba(255,255,255,.10); --track: #2c2c2a; --wash: rgba(255,255,255,.05);
+      --page: #0b0f17; --surface: #151a24; --ink: #eef1f6; --ink2: #b7c0cf; --muted: #8b96a8;
+      --grid: #232b39; --axis: #323c4d; --border: #232b39; --track: #232b39; --wash: #1b2230;
+      --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.35);
       --s1: #3987e5; --s2: #d95926; --s3: #199e70; --good-text: #0ca30c;
     }
   }
   :root[data-theme="dark"] {
     color-scheme: dark;
-    --page: #0d0d0d; --surface: #1a1a19; --ink: #f0efec; --ink2: #c3c2b7; --muted: #898781;
-    --grid: #2c2c2a; --axis: #383835; --border: rgba(255,255,255,.10); --track: #2c2c2a; --wash: rgba(255,255,255,.05);
+    --page: #0b0f17; --surface: #151a24; --ink: #eef1f6; --ink2: #b7c0cf; --muted: #8b96a8;
+    --grid: #232b39; --axis: #323c4d; --border: #232b39; --track: #232b39; --wash: #1b2230;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.35);
     --s1: #3987e5; --s2: #d95926; --s3: #199e70; --good-text: #0ca30c;
   }
   * { box-sizing: border-box; }
-  body { margin: 0; background: var(--page); color: var(--ink); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
-  .page { max-width: 1180px; margin: 0 auto; padding: 24px 16px 48px; }
-  h1 { font-size: 22px; margin: 0; font-weight: 650; }
-  h2 { font-size: 15px; margin: 0; font-weight: 650; }
-  .sub { color: var(--ink2); font-size: 13px; margin-top: 2px; }
+  html { -webkit-text-size-adjust: 100%; }
+  body { margin: 0; background: var(--page); color: var(--ink); font: 14px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; -webkit-font-smoothing: antialiased; }
   .muted { color: var(--ink2); }
-  .head { display: flex; flex-wrap: wrap; gap: 12px; justify-content: space-between; align-items: flex-start; margin-bottom: 16px; }
-  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px 18px; margin-bottom: 14px; }
-  .card > header { display: flex; flex-wrap: wrap; gap: 6px 16px; justify-content: space-between; align-items: baseline; margin-bottom: 10px; }
-
-  .banner { display: flex; gap: 12px; align-items: flex-start; border-left: 4px solid var(--c); }
-  .banner .big { font-size: 16px; font-weight: 650; }
-  .ico { display: inline-flex; width: 18px; height: 18px; border-radius: 50%; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; color: #fff; background: var(--c); flex: none; }
-  .ico.warn, .ico.warning { color: #0b0b0b; }
   .good { --c: var(--good); } .warn { --c: var(--warn); } .crit { --c: var(--crit); } .info { --c: var(--s1); } .serious { --c: var(--serious); }
+  :focus-visible { outline: 2px solid var(--s1); outline-offset: 2px; border-radius: 6px; }
 
-  .filters { display: flex; flex-wrap: wrap; gap: 12px 20px; align-items: center; position: sticky; top: 0; z-index: 5; background: var(--page); padding: 10px 0; margin-bottom: 4px; }
-  .filters label { font-size: 12px; color: var(--ink2); display: flex; align-items: center; gap: 8px; }
-  select, button { font: inherit; color: var(--ink); background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; }
-  select { min-width: 280px; max-width: 100%; }
-  button { cursor: pointer; }
-  .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
-  .seg button { border: 0; border-radius: 0; background: var(--surface); }
-  .seg button[aria-pressed="true"] { background: var(--ink); color: var(--surface); }
-  :focus-visible { outline: 2px solid var(--s1); outline-offset: 2px; }
+  /* ---------- hero ---------- */
+  .hero { color: #fff; padding: 34px 0 96px;
+    background: radial-gradient(900px 320px at 88% -30%, rgba(80,150,255,.38), transparent 62%), radial-gradient(640px 280px at 4% 130%, rgba(27,175,122,.20), transparent 60%),
+                linear-gradient(135deg, #091a31 0%, #0f2f5c 55%, #17488a 100%); }
+  .hero-in { max-width: 1180px; margin: 0 auto; padding: 0 20px; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 28px; align-items: end; }
+  .eyebrow { display: flex; align-items: center; gap: 10px; font-size: 12px; letter-spacing: .14em; text-transform: uppercase; color: rgba(255,255,255,.72); font-weight: 600; }
+  .eyebrow svg { width: 22px; height: 22px; }
+  .hero h1 { margin: 10px 0 12px; font-size: clamp(26px, 4vw, 38px); line-height: 1.1; font-weight: 700; letter-spacing: -.02em; overflow-wrap: anywhere; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip-h { font-size: 12.5px; color: rgba(255,255,255,.92); background: rgba(255,255,255,.12); border: 1px solid rgba(255,255,255,.16); border-radius: 999px; padding: 3px 11px; }
+  .verdict { min-width: 280px; max-width: 420px; display: flex; gap: 12px; align-items: flex-start; padding: 14px 16px; border-radius: 14px;
+    background: rgba(255,255,255,.10); border: 1px solid rgba(255,255,255,.20); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
+  .verdict .big { font-size: 17px; font-weight: 700; letter-spacing: -.01em; }
+  .verdict .det { font-size: 12.5px; color: rgba(255,255,255,.82); margin-top: 2px; }
+  .verdict .ico { width: 26px; height: 26px; font-size: 14px; margin-top: 1px; }
 
-  .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(128px, 1fr)); gap: 10px; }
-  .kpi { background: var(--wash); border-radius: 8px; padding: 10px 12px; }
-  .kpi .l { font-size: 12px; color: var(--ink2); }
-  .kpi .v { font-size: 24px; font-weight: 650; letter-spacing: -.01em; margin-top: 2px; display: flex; align-items: center; gap: 8px; }
-  .kpi .n { font-size: 12px; color: var(--ink2); }
-  .caption { font-size: 12px; color: var(--ink2); margin-top: 8px; }
+  .page { max-width: 1180px; margin: -58px auto 0; padding: 0 20px 56px; position: relative; }
+  .ico { display: inline-flex; width: 18px; height: 18px; border-radius: 50%; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; color: #fff; background: var(--c); flex: none; }
+  .ico.warn, .ico.warning { color: #1a1300; }
 
-  ul.obs { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
-  ul.obs li { display: flex; gap: 10px; align-items: flex-start; }
+  /* ---------- toolbar ---------- */
+  .toolbar { position: sticky; top: 10px; z-index: 6; display: flex; flex-wrap: wrap; gap: 10px 22px; align-items: center; padding: 10px 14px; margin-bottom: 22px;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--shadow); }
+  .toolbar label { display: flex; align-items: center; gap: 9px; font-size: 12px; font-weight: 600; color: var(--ink2); }
+  .toolbar .grow { flex: 1; }
+  select, button { font: inherit; color: var(--ink); }
+  select { appearance: none; -webkit-appearance: none; min-width: 300px; max-width: 100%; padding: 7px 34px 7px 12px; border-radius: 10px; border: 1px solid var(--border); background-color: var(--wash); font-weight: 500;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' fill='none' stroke='%238a94a6' stroke-width='1.6' stroke-linecap='round'/%3E%3C/svg%3E");
+    background-repeat: no-repeat; background-position: right 12px center; cursor: pointer; }
+  select:hover { border-color: var(--axis); }
+  .btn { cursor: pointer; background: var(--wash); border: 1px solid var(--border); border-radius: 10px; padding: 7px 12px; font-weight: 500; }
+  .btn:hover { border-color: var(--axis); }
+  .seg { display: inline-flex; padding: 3px; gap: 2px; background: var(--wash); border: 1px solid var(--border); border-radius: 10px; }
+  .seg button { border: 0; background: transparent; padding: 4px 14px; border-radius: 7px; cursor: pointer; font-weight: 500; color: var(--ink2); }
+  .seg button[aria-pressed="true"] { background: var(--surface); color: var(--ink); box-shadow: 0 1px 3px rgba(16,24,40,.18); }
 
+  /* ---------- cards ---------- */
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 20px 22px; margin-bottom: 18px; box-shadow: var(--shadow); animation: rise .5s ease both; }
+  .card > header { display: flex; flex-wrap: wrap; gap: 8px 18px; justify-content: space-between; align-items: flex-start; margin-bottom: 14px; }
+  h2 { font-size: 16px; margin: 0; font-weight: 650; letter-spacing: -.01em; }
+  .sub { color: var(--ink2); font-size: 12.5px; margin-top: 2px; }
+  .scope { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 16px; margin: 4px 2px 12px; }
+  .scope h2 { font-size: 20px; letter-spacing: -.02em; }
+  .scope .sub { overflow-wrap: anywhere; }
+  .caption { font-size: 12.5px; color: var(--ink2); margin: 10px 2px 0; }
+  @keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+  @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+
+  /* ---------- KPI tiles ---------- */
+  .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 14px; }
+  .kpi { position: relative; overflow: hidden; background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 15px 16px 14px; box-shadow: var(--shadow);
+    animation: rise .5s ease both; animation-delay: calc(var(--i, 0) * 45ms); }
+  .kpi::before { content: ""; position: absolute; left: 0; top: 0; right: 0; height: 3px; background: var(--c, var(--axis)); opacity: .9; }
+  .kpi .l { font-size: 11px; font-weight: 650; letter-spacing: .08em; text-transform: uppercase; color: var(--ink2); }
+  .kpi .v { font-size: 28px; font-weight: 700; letter-spacing: -.02em; line-height: 1.15; margin-top: 6px; display: flex; align-items: center; gap: 8px; }
+  .kpi .n { font-size: 12px; color: var(--ink2); margin-top: 2px; position: relative; z-index: 1; }
+  .kpi.sp { padding-bottom: 54px; }
+  .kpi .spark { position: absolute; left: 10px; right: 10px; bottom: 8px; width: calc(100% - 20px); height: 36px; pointer-events: none; }
+
+  /* ---------- findings ---------- */
+  .finds { display: grid; gap: 10px; }
+  .find { display: flex; gap: 12px; align-items: flex-start; padding: 11px 14px; border-radius: 12px; border: 1px solid var(--border); border-left: 4px solid var(--c); background: var(--wash); }
+  @supports (background: color-mix(in srgb, red 10%, white)) { .find { background: color-mix(in srgb, var(--c) 7%, var(--surface)); } }
+  .find .ico { margin-top: 1px; }
+
+  /* ---------- tables ---------- */
   table { width: 100%; border-collapse: collapse; font-size: 13px; }
-  th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--grid); vertical-align: middle; }
-  th { font-size: 12px; font-weight: 600; color: var(--ink2); white-space: nowrap; }
+  th, td { text-align: left; padding: 10px 10px; border-bottom: 1px solid var(--grid); vertical-align: middle; }
+  th { font-size: 11px; font-weight: 650; color: var(--ink2); white-space: nowrap; text-transform: uppercase; letter-spacing: .06em; }
   td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
   tbody tr:last-child td { border-bottom: 0; }
   tr.click { cursor: pointer; } tr.click:hover td { background: var(--wash); }
   .tablewrap { overflow-x: auto; }
-  .chip { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; white-space: nowrap; }
-  .meth { font-size: 11px; font-weight: 650; border: 1px solid var(--axis); border-radius: 4px; padding: 0 5px; color: var(--ink2); margin-right: 6px; }
-  .linklike { border: 0; background: none; padding: 0; color: var(--ink); text-align: left; text-decoration: underline; text-decoration-color: var(--axis); text-underline-offset: 3px; }
-  .minibar { height: 4px; border-radius: 2px; background: var(--s1); margin-top: 4px; min-width: 2px; }
-  .url { word-break: break-all; font-size: 12px; color: var(--ink2); }
+  .chip { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; white-space: nowrap; }
+  .pill { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 600; white-space: nowrap; padding: 2px 10px 2px 6px; border-radius: 999px; border: 1px solid var(--border); background: var(--wash); }
+  @supports (background: color-mix(in srgb, red 10%, white)) { .pill { background: color-mix(in srgb, var(--c) 9%, var(--surface)); border-color: color-mix(in srgb, var(--c) 30%, var(--surface)); } }
+  .meth { display: inline-block; min-width: 46px; text-align: center; font-size: 10.5px; font-weight: 700; letter-spacing: .04em; border-radius: 6px; padding: 2px 6px; margin-right: 8px; color: var(--ink);
+    background: var(--wash); border: 1px solid var(--border); }
+  @supports (background: color-mix(in srgb, red 10%, white)) { .meth { background: color-mix(in srgb, var(--c, var(--axis)) 14%, var(--surface)); border-color: color-mix(in srgb, var(--c, var(--axis)) 35%, var(--surface)); } }
+  .m-GET { --c: #2a78d6; } .m-POST { --c: #1b9e63; } .m-PUT { --c: #e08a14; } .m-PATCH { --c: #7a5bd6; } .m-DELETE { --c: #d03b3b; }
+  .linklike { border: 0; background: none; padding: 0; color: var(--ink); font-weight: 550; text-align: left; cursor: pointer; text-decoration: underline; text-decoration-color: var(--axis); text-underline-offset: 3px; }
+  .minibar { height: 5px; border-radius: 3px; background: linear-gradient(90deg, var(--s1), color-mix(in srgb, var(--s1) 55%, var(--surface))); margin-top: 5px; min-width: 3px; margin-left: auto; }
 
-  .legend { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 12px; color: var(--ink2); }
-  .legend .key, .tip .key { display: inline-block; width: 14px; height: 0; border-top: 2px solid var(--c); vertical-align: middle; margin-right: 6px; border-radius: 1px; }
+  /* ---------- charts ---------- */
+  .legend { display: flex; flex-wrap: wrap; gap: 6px 8px; font-size: 12px; color: var(--ink2); }
+  .legend span { display: inline-flex; align-items: center; gap: 7px; padding: 2px 10px; border-radius: 999px; background: var(--wash); border: 1px solid var(--border); }
+  .legend .key, .tip .key { display: inline-block; width: 14px; height: 0; border-top: 2px solid var(--c); border-radius: 1px; }
   .chartbox { position: relative; }
   .chartbox svg { display: block; width: 100%; overflow: visible; }
-  .chartbox + .chartbox { margin-top: 8px; }
-  .strip-title { font-size: 12px; font-weight: 600; color: var(--ink2); margin: 10px 0 2px; }
-  .tip { position: absolute; pointer-events: none; z-index: 4; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; font-size: 12px; box-shadow: 0 4px 14px rgba(0,0,0,.14); white-space: nowrap; }
-  .tip .t { color: var(--ink2); margin-bottom: 4px; }
-  .tip .row { display: flex; gap: 14px; justify-content: space-between; align-items: center; }
-  .tip .row b { font-weight: 650; font-variant-numeric: tabular-nums; }
+  .strip-title { font-size: 11px; font-weight: 650; letter-spacing: .08em; text-transform: uppercase; color: var(--ink2); margin: 14px 0 2px; }
+  .strip-title:first-of-type { margin-top: 2px; }
+  .tip { position: absolute; pointer-events: none; z-index: 4; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 9px 12px; font-size: 12px; box-shadow: 0 8px 24px rgba(16,24,40,.18); white-space: nowrap; }
+  .tip .t { color: var(--ink2); margin-bottom: 5px; }
+  .tip .row { display: flex; gap: 16px; justify-content: space-between; align-items: center; margin-top: 2px; }
+  .tip .row span { display: inline-flex; align-items: center; gap: 7px; color: var(--ink2); }
+  .tip .row b { font-weight: 700; color: var(--ink); font-variant-numeric: tabular-nums; }
   #gtip { position: fixed; z-index: 20; pointer-events: none; }
   svg text { font: 11px system-ui, -apple-system, "Segoe UI", sans-serif; fill: var(--muted); }
+  svg text.ref { fill: var(--ink2); font-weight: 600; }
 
-  .bars { display: grid; gap: 8px; }
-  .brow { display: grid; grid-template-columns: 64px 1fr; gap: 10px; align-items: center; font-size: 13px; }
-  .barea { display: flex; align-items: center; gap: 8px; }
-  .fill { height: 14px; width: calc((100% - 84px) * var(--k, 0)); min-width: 2px; background: var(--s1); border-radius: 0 4px 4px 0; }
-  .brow:hover .fill { filter: brightness(1.12); }
-  .val { font-variant-numeric: tabular-nums; font-weight: 600; white-space: nowrap; }
-  .seg8 { display: flex; gap: 2px; height: 8px; margin: 6px 0 10px; }
-  .seg8 span { border-radius: 4px; background: var(--c); min-width: 2px; }
-  .twocol { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 14px; }
+  /* ---------- distribution bars ---------- */
+  .bars { display: grid; gap: 12px; margin-top: 4px; }
+  .brow { display: grid; grid-template-columns: 62px 1fr 74px; gap: 12px; align-items: center; font-size: 13px; border-radius: 8px; }
+  .brow .track { position: relative; height: 12px; background: var(--track); border-radius: 6px; }
+  .brow .fill { position: absolute; left: 0; top: 0; bottom: 0; width: calc(var(--k, 0) * 100%); min-width: 4px; border-radius: 0 4px 4px 0;
+    background: linear-gradient(90deg, color-mix(in srgb, var(--s1) 62%, var(--surface)), var(--s1)); animation: grow .8s cubic-bezier(.2,.7,.2,1) both; }
+  .brow.key .fill { background: linear-gradient(90deg, color-mix(in srgb, var(--s2) 62%, var(--surface)), var(--s2)); }
+  .brow .lab { color: var(--ink2); font-weight: 500; }
+  .brow.key .lab { color: var(--ink); font-weight: 700; }
+  .brow .val { text-align: right; font-variant-numeric: tabular-nums; font-weight: 650; white-space: nowrap; }
+  .brow:hover .fill { filter: brightness(1.1); }
+  @keyframes grow { from { width: 0; } }
+  .seg8 { display: flex; gap: 3px; height: 10px; margin: 4px 0 14px; }
+  .seg8 span { border-radius: 5px; background: var(--c); min-width: 3px; }
+  .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 3px; }
+
+  .twocol { display: grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); gap: 18px; margin-bottom: 18px; }
   .twocol > .card { margin-bottom: 0; }
-  details summary { cursor: pointer; font-weight: 600; }
-  dl.kv { display: grid; grid-template-columns: max-content 1fr; gap: 4px 18px; margin: 10px 0 0; font-size: 13px; }
-  dl.kv dt { color: var(--ink2); } dl.kv dd { margin: 0; word-break: break-word; }
-  footer { color: var(--ink2); font-size: 12px; margin-top: 18px; display: grid; gap: 4px; }
+  details.card summary { cursor: pointer; font-weight: 650; font-size: 15px; }
+  dl.kv { display: grid; grid-template-columns: max-content 1fr; gap: 8px 22px; margin: 14px 0 0; font-size: 13px; }
+  dl.kv dt { color: var(--ink2); } dl.kv dd { margin: 0; overflow-wrap: anywhere; }
+  footer { color: var(--ink2); font-size: 12px; margin-top: 8px; display: grid; gap: 4px; padding: 16px 4px 0; border-top: 1px solid var(--border); }
   footer a, dd a { color: inherit; text-decoration-color: var(--axis); text-underline-offset: 3px; }
-  @media print { .filters { display: none; } .card { break-inside: avoid; } body { background: #fff; } }
+  @media (max-width: 720px) { .hero-in { grid-template-columns: 1fr; } .verdict { max-width: none; } select { min-width: 0; width: 100%; } .toolbar label { width: 100%; } .twocol { grid-template-columns: 1fr; } .card { padding: 16px; } }
+  @media print {
+    .toolbar { display: none; } .card, .kpi { break-inside: avoid; box-shadow: none; animation: none; } body { background: #fff; }
+    .hero { -webkit-print-color-adjust: exact; print-color-adjust: exact; } .page { margin-top: -40px; }
+  }
 </style>
 </head>
 <body>
-<div class="page" id="app"></div>
+<div id="app"></div>
 <div id="gtip" class="tip" hidden></div>
 <script id="payload" type="application/json">__REPORT_DATA__</script>
 <script>
@@ -146,6 +205,7 @@
     for (var i = 2; i < arguments.length; i++) if (arguments[i] != null) n.appendChild(typeof arguments[i] === 'string' ? document.createTextNode(arguments[i]) : arguments[i]);
     return n;
   }
+  var uid = 0;
   function isNum(v) { return typeof v === 'number' && isFinite(v); }
   function fmtMs(v) {
     if (!isNum(v)) return '–';
@@ -172,6 +232,7 @@
   function pathOf(url) { try { var u = new URL(url); return u.pathname + (u.search || ''); } catch (e) { return url; } }
   function shortLabel(e) { return /^[A-Z]+ https?:\/\//.test(e.label) ? e.method + ' ' + pathOf(e.url) : e.label; }
   function epName(e) { return '#' + e.index + ' ' + shortLabel(e); }
+  function methBadge(m) { return h('span', { class: 'meth m-' + m }, m); }
 
   var MEANING = { 200: 'OK', 201: 'Created', 202: 'Accepted', 204: 'No Content', 301: 'Moved Permanently', 302: 'Found', 304: 'Not Modified',
     400: 'Bad Request', 401: 'Unauthorized', 403: 'Forbidden', 404: 'Not Found', 405: 'Method Not Allowed', 408: 'Request Timeout', 409: 'Conflict',
@@ -179,6 +240,7 @@
     503: 'Service Unavailable', 504: 'Gateway Timeout' };
   var ICON = { good: '✓', warn: '!', crit: '✕', info: 'i', serious: '!' };
   function icon(level) { return h('span', { class: 'ico ' + level, 'aria-hidden': 'true' }, ICON[level] || 'i'); }
+  function lv(level) { return level === 'info' ? 's1' : level; }
 
   /* ---------- global hover tooltip for bars and rows ---------- */
   var gtip = document.getElementById('gtip');
@@ -214,17 +276,47 @@
     return { name: epName(e), requests: e.requests, ok: e.ok, failed: e.failed, noResponse: e.noResponse, successRate: e.successRate, rps: e.requestsPerSec,
       lat: e.latencyOk || e.latencyAll, latKind: e.latencyOk ? 'ok' : 'errors', sr: S && S.endpoints && S.endpoints[String(e.index)], e: e };
   }
+  // the response-time series to draw: successful requests when there are any, otherwise whatever exists
+  function latSeries(info) {
+    var sr = info.sr; if (!sr) return null;
+    var hasOk = !!(sr.latencyOk && sr.latencyOk.avg.some(isNum));
+    return { L: hasOk ? sr.latencyOk : sr.latency, hasOk: hasOk };
+  }
 
-  /* ---------- result banner ---------- */
+  /* ---------- result verdict ---------- */
   function bannerModel() {
     var status = M.status, detail = M.detail || '';
     var noSuccess = EPS.some(function (e) { return e.status === 'NO_SUCCESS'; });
     var thrFail = (R.thresholds || []).some(function (t) { return !t.ok; });
     if (!status) status = (run.stoppedEarly || noSuccess) ? 'FAILED' : 'PASSED';
     var sla = /SLA MISSED/i.test(detail) || (!M.status && thrFail);
-    if (status === 'FAILED') return { level: 'crit', title: 'FAILED', detail: detail };
-    if (sla) return { level: 'warn', title: 'PASSED – SLA missed', detail: detail || 'The test ran, but one or more thresholds were not met.' };
-    return { level: 'good', title: 'PASSED', detail: detail || 'The test ran and all thresholds were met.' };
+    if (status === 'FAILED') return { level: 'crit', title: 'Failed', detail: detail };
+    if (sla) return { level: 'warn', title: 'Passed – SLA missed', detail: detail || 'The test ran, but one or more thresholds were not met.' };
+    return { level: 'good', title: 'Passed', detail: detail || 'The test ran and all thresholds were met.' };
+  }
+
+  /* ---------- SLA limits (from the k6 thresholds) and load stages (from the profile) ---------- */
+  function latencyRefs() {
+    var out = [];
+    (R.thresholds || []).forEach(function (t) {
+      if (t.metric !== 'http_req_duration') return;
+      var m = /^(avg|p\((\d+(?:\.\d+)?)\))\s*(<=|<)\s*([\d.]+)$/.exec(t.rule); if (!m) return;
+      var name = m[1] === 'avg' ? 'avg' : 'p' + m[2], color = m[1] === 'avg' ? 'var(--s1)' : m[2] === '95' ? 'var(--s2)' : m[2] === '99' ? 'var(--s3)' : 'var(--muted)';
+      out.push({ value: Number(m[4]), label: 'Limit ' + name + ' ' + fmtMs(Number(m[4])), color: color });
+    });
+    return out;
+  }
+  function parseDur(s) {
+    var total = 0, m, re = /(\d+(?:\.\d+)?)(ms|s|m|h)/g, mult = { ms: 0.001, s: 1, m: 60, h: 3600 };
+    while ((m = re.exec(String(s))) !== null) total += Number(m[1]) * mult[m[2]];
+    return total;
+  }
+  function stageList() {
+    var st = (R.profile && R.profile.stages) || [], t = 0, prev = 0;
+    return st.map(function (s) {
+      var d = parseDur(s.duration), o = { t0: t, t1: t + d, target: s.target, kind: s.target > prev ? 'up' : s.target < prev ? 'down' : 'hold' };
+      t += d; prev = s.target; return o;
+    });
   }
 
   /* ---------- observations (rule based hints, each one is a plain sentence) ---------- */
@@ -242,9 +334,9 @@
     return '–';
   }
   function saturationHint(info) {
-    if (!S || !info.sr || !info.sr.rps) return null;
-    var vus = S.vus, rps = info.sr.rps, reqs = info.sr.requests;
-    var l = info.sr.latencyOk && info.sr.latencyOk.avg.some(isNum) ? info.sr.latencyOk.avg : info.sr.latency.avg;
+    var ls = latSeries(info);
+    if (!S || !info.sr || !info.sr.rps || !ls) return null;
+    var vus = S.vus, rps = info.sr.rps, reqs = info.sr.requests, l = ls.L.avg;
     var vals = vus.filter(isNum); if (vals.length < 5) return null;
     var maxV = Math.max.apply(null, vals); if (maxV < 4) return null;
     var early = vus.findIndex(function (v) { return isNum(v) && v >= 0.5 * maxV; }), peak = vus.indexOf(maxV);
@@ -289,11 +381,11 @@
     return out;
   }
 
-  /* ---------- line charts: inline SVG, one y axis per chart, synced crosshair ---------- */
+  /* ---------- line charts: inline SVG, one y axis per chart, gradient wash under every line, synced crosshair ---------- */
   var charts = [];
   function niceStep(raw) { var p = Math.pow(10, Math.floor(Math.log10(raw))), f = raw / p; return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 2.5 ? 2.5 : f <= 5 ? 5 : 10) * p; }
   function lineChart(host, cfg) {
-    var H = cfg.height || 200, ml = 52, mr = 14, mt = 10, mb = 24;
+    var H = cfg.height || 200, ml = 50, mr = 16, mt = 16, mb = 26, gid = 'g' + (++uid);
     var tip = h('div', { class: 'tip', hidden: true }); host.appendChild(tip);
     var api = { idx: null }, svgEl = null, geo = null;
     function draw() {
@@ -302,35 +394,61 @@
       var xmax = Math.max(xs[xs.length - 1], 1), all = [];
       cfg.series.forEach(function (s) { s.values.forEach(function (v) { if (isNum(v)) all.push(v); }); });
       var vmax = all.length ? Math.max.apply(null, all) : 1; if (vmax <= 0) vmax = 1;
+      // SLA limit lines are only drawn when they are in reach of the data, so one far-away limit cannot flatten the curve
+      var refs = (cfg.refs || []).filter(function (r) { return r.value <= vmax * 3; });
+      refs.forEach(function (r) { if (r.value > vmax) vmax = r.value; });
       var step = niceStep(vmax / 4), ymax = step * Math.ceil(vmax / step);
       var X = function (t) { return ml + t / xmax * iw; }, Y = function (v) { return mt + ih - v / ymax * ih; };
       geo = { X: X, Y: Y, iw: iw, W: W };
       var g = sv('svg', { viewBox: '0 0 ' + W + ' ' + H, role: 'img', tabindex: '0', 'aria-label': cfg.title + '. Use the left and right arrow keys to read values.', height: H });
+      var defs = sv('defs');
+      cfg.series.forEach(function (s, k) {
+        var lg = sv('linearGradient', { id: gid + '-' + k, x1: '0', y1: '0', x2: '0', y2: '1' });
+        lg.appendChild(sv('stop', { offset: '0', style: 'stop-color:' + s.color + ';stop-opacity:' + (cfg.top || 0.26) }));
+        lg.appendChild(sv('stop', { offset: '1', style: 'stop-color:' + s.color + ';stop-opacity:0.02' }));
+        defs.appendChild(lg);
+      });
+      g.appendChild(defs);
       for (var v = 0; v <= ymax + step / 100; v += step) {
         g.appendChild(sv('line', { x1: ml, x2: W - mr, y1: Y(v), y2: Y(v), stroke: 'var(--grid)', 'stroke-width': 1 }));
-        g.appendChild(sv('text', { x: ml - 8, y: Y(v) + 4, 'text-anchor': 'end' }, cfg.tick(v)));
+        g.appendChild(sv('text', { x: ml - 10, y: Y(v) + 4, 'text-anchor': 'end' }, cfg.tick(v)));
       }
       var xstep = [5, 10, 15, 30, 60, 120, 300, 600].filter(function (s) { return xmax / s <= 8; })[0] || 600;
-      for (var t = 0; t <= xmax + 0.01; t += xstep) g.appendChild(sv('text', { x: X(t), y: H - 6, 'text-anchor': t === 0 ? 'start' : 'middle' }, fmtDur(t)));
+      for (var t = 0; t <= xmax + 0.01; t += xstep) g.appendChild(sv('text', { x: X(t), y: H - 7, 'text-anchor': t === 0 ? 'start' : 'middle' }, fmtDur(t)));
+      // load stages: a hairline at every stage boundary, and on the first chart of a group a short label per stage
+      (cfg.stages || []).forEach(function (st, i) {
+        if (st.t0 > 0 && st.t0 < xmax) g.appendChild(sv('line', { x1: X(st.t0), x2: X(st.t0), y1: mt, y2: Y(0), stroke: 'var(--axis)', 'stroke-width': 1 }));
+        if (cfg.stageLabels && st.t0 < xmax) g.appendChild(sv('text', { x: X(st.t0) + 6, y: mt - 3, 'text-anchor': 'start' }, (st.kind === 'up' ? '↗ ramp to ' : st.kind === 'down' ? '↘ ramp to ' : '→ hold ') + st.target));
+      });
       g.appendChild(sv('line', { x1: ml, x2: W - mr, y1: Y(0), y2: Y(0), stroke: 'var(--axis)', 'stroke-width': 1 }));
-      cfg.series.forEach(function (s) {
-        var d = '', pen = false, areaD = '', seg = [];
+      // washes first (back to front, so the lowest series stays on top), then the lines
+      for (var k = cfg.series.length - 1; k >= 0; k--) {
+        var s = cfg.series[k], areaD = '', seg = [];
         s.values.forEach(function (val, i) {
-          if (!isNum(val)) { pen = false; if (seg.length) { areaD += seg.join('') + 'L' + X(xs[i - 1]) + ' ' + Y(0) + 'Z'; seg = []; } return; }
+          if (!isNum(val)) { if (seg.length) { areaD += seg.join('') + 'L' + X(xs[i - 1]) + ' ' + Y(0) + 'Z'; seg = []; } return; }
           var pt = X(xs[i]) + ' ' + Y(val);
-          d += (pen ? 'L' : 'M') + pt; pen = true;
           seg.push((seg.length ? 'L' : 'M' + X(xs[i]) + ' ' + Y(0) + 'L') + pt);
         });
         if (seg.length) areaD += seg.join('') + 'L' + X(xs[xs.length - 1]) + ' ' + Y(0) + 'Z';
-        if (cfg.area) g.appendChild(sv('path', { d: areaD, fill: s.color, 'fill-opacity': 0.10, stroke: 'none' }));
+        if (cfg.area !== false) g.appendChild(sv('path', { d: areaD, fill: 'url(#' + gid + '-' + k + ')', stroke: 'none' }));
+      }
+      cfg.series.forEach(function (s) {
+        var d = '', pen = false;
+        s.values.forEach(function (val, i) { if (!isNum(val)) { pen = false; return; } d += (pen ? 'L' : 'M') + X(xs[i]) + ' ' + Y(val); pen = true; });
         g.appendChild(sv('path', { d: d, fill: 'none', stroke: s.color, 'stroke-width': 2, 'stroke-linejoin': 'round', 'stroke-linecap': 'round' }));
         for (var j = s.values.length - 1; j >= 0; j--) if (isNum(s.values[j])) {
           g.appendChild(sv('circle', { cx: X(xs[j]), cy: Y(s.values[j]), r: 4, fill: s.color, stroke: 'var(--surface)', 'stroke-width': 2 })); break;
         }
       });
+      // SLA limits: dashed line in the colour of the series it limits, a direct label at the right end (labels that would overlap are skipped)
+      var lastY = -99;
+      refs.slice().sort(function (a, b) { return b.value - a.value; }).forEach(function (r) {
+        g.appendChild(sv('line', { x1: ml, x2: W - mr, y1: Y(r.value), y2: Y(r.value), stroke: r.color, 'stroke-width': 1.5, 'stroke-dasharray': '6 4' }));
+        if (Math.abs(Y(r.value) - lastY) >= 13) { g.appendChild(sv('text', { class: 'ref', x: W - mr - 4, y: Y(r.value) - 5, 'text-anchor': 'end' }, r.label)); lastY = Y(r.value); }
+      });
       var cur = sv('g', { visibility: 'hidden' });
       cur.appendChild(sv('line', { class: 'cl', y1: mt, y2: Y(0), stroke: 'var(--ink2)', 'stroke-width': 1 }));
-      cfg.series.forEach(function (s) { cur.appendChild(sv('circle', { r: 4, fill: s.color, stroke: 'var(--surface)', 'stroke-width': 2 })); });
+      cfg.series.forEach(function (s) { cur.appendChild(sv('circle', { r: 4.5, fill: s.color, stroke: 'var(--surface)', 'stroke-width': 2 })); });
       g.appendChild(cur);
       var hit = sv('rect', { x: ml, y: 0, width: iw, height: H - mb + 4, fill: 'transparent' });
       hit.addEventListener('pointermove', function (ev) {
@@ -369,7 +487,22 @@
     return api;
   }
 
-  function legend(series) {
+  // small trend line for the KPI tiles (same colours as the matching line in the response-time chart)
+  function sparkline(values, color) {
+    var pts = values.map(function (v, i) { return isNum(v) ? [i, v] : null; }).filter(Boolean);
+    if (pts.length < 2) return null;
+    var w = 120, hgt = 40, max = Math.max.apply(null, pts.map(function (p) { return p[1]; })), min = Math.min.apply(null, pts.map(function (p) { return p[1]; }));
+    if (max === min) { max += 1; min -= 1; }
+    var n = values.length - 1, gid = 'sp' + (++uid);
+    var X = function (i) { return i / n * w; }, Y = function (v) { return hgt - 4 - (v - min) / (max - min) * (hgt - 12); };
+    var d = pts.map(function (p, k) { return (k ? 'L' : 'M') + X(p[0]).toFixed(1) + ' ' + Y(p[1]).toFixed(1); }).join('');
+    var lg = sv('linearGradient', { id: gid, x1: '0', y1: '0', x2: '0', y2: '1' }, sv('stop', { offset: '0', style: 'stop-color:' + color + ';stop-opacity:.28' }), sv('stop', { offset: '1', style: 'stop-color:' + color + ';stop-opacity:0' }));
+    return sv('svg', { class: 'spark', viewBox: '0 0 ' + w + ' ' + hgt, preserveAspectRatio: 'none', 'aria-hidden': 'true' }, sv('defs', null, lg),
+      sv('path', { d: d + 'L' + X(pts[pts.length - 1][0]).toFixed(1) + ' ' + hgt + 'L' + X(pts[0][0]).toFixed(1) + ' ' + hgt + 'Z', fill: 'url(#' + gid + ')', stroke: 'none' }),
+      sv('path', { d: d, fill: 'none', stroke: color, 'stroke-width': 1.75, 'stroke-linejoin': 'round', 'stroke-linecap': 'round', 'vector-effect': 'non-scaling-stroke' }));
+  }
+
+  function legendEl(series) {
     return series.length < 2 ? null : h('div', { class: 'legend' }, series.map(function (s) { return h('span', { style: '--c:' + s.color }, h('i', { class: 'key' }), s.label); }));
   }
   function dataTable(cols, rows) {
@@ -377,76 +510,78 @@
       h('thead', null, h('tr', null, cols.map(function (c, i) { return h('th', { class: i ? 'num' : '' }, c); }))),
       h('tbody', null, rows.map(function (r) { return h('tr', null, r.map(function (c, i) { return h('td', { class: i ? 'num' : '' }, c); })); }))));
   }
+  var pending = [];
   function seriesCard(title, sub, series, x, fmt, tick, opts) {
     opts = opts || {};
-    var card = h('div', { class: 'card' }, h('header', null, h('h2', null, title), sub ? h('span', { class: 'sub' }, sub) : null));
-    var lg = legend(series); if (lg && state.view === 'charts') card.appendChild(lg);
+    var card = h('div', { class: 'card' }, h('header', null, h('div', null, h('h2', null, title), sub ? h('div', { class: 'sub' }, sub) : null), state.view === 'charts' ? legendEl(series) : null));
     if (state.view === 'tables') {
       card.appendChild(dataTable(['Time'].concat(series.map(function (s) { return s.label; })), x.map(function (t, i) {
         return [fmtDur(t)].concat(series.map(function (s) { return isNum(s.values[i]) ? fmt(s.values[i]) : '–'; }));
       })));
     } else {
       var box = h('div', { class: 'chartbox' }); card.appendChild(box);
-      pending.push(function () { lineChart(box, { title: title, x: x, period: S.period, series: series, fmt: fmt, tick: tick, height: opts.height || 220, area: opts.area }); });
+      pending.push(function () { lineChart(box, { title: title, x: x, period: S.period, series: series, fmt: fmt, tick: tick, height: opts.height || 220, refs: opts.refs, stages: stageList() }); });
     }
     return card;
   }
-  var pending = [];
 
   /* ---------- sections ---------- */
   function kpis(info) {
-    var sr = info.successRate, lvl = sr == null ? 'info' : sr >= 1 ? 'good' : sr > 0 ? 'warn' : 'crit', L = info.lat;
-    function tile(label, value, note, ic) { return h('div', { class: 'kpi' }, h('div', { class: 'l' }, label), h('div', { class: 'v' }, value, ic || null), note ? h('div', { class: 'n' }, note) : null); }
-    return h('section', { class: 'card' },
-      h('header', null, h('h2', null, info.name), h('span', { class: 'sub' }, info.e ? info.e.method + ' ' + info.e.url : EPS.length + ' endpoint' + (EPS.length === 1 ? '' : 's'))),
+    var sr = info.successRate, level = sr == null ? 'info' : sr >= 1 ? 'good' : sr > 0 ? 'warn' : 'crit', L = info.lat, ls = latSeries(info), i = 0;
+    function tile(label, value, note, opts) {
+      opts = opts || {};
+      return h('div', { class: 'kpi ' + (opts.level || '') + (opts.spark ? ' sp' : ''), style: '--i:' + (i++) + (opts.accent ? ';--c:' + opts.accent : '') }, h('div', { class: 'l' }, label), h('div', { class: 'v' }, value, opts.icon || null), note ? h('div', { class: 'n' }, note) : null, opts.spark || null);
+    }
+    var thr = info.sr;
+    return [h('div', { class: 'scope' }, h('h2', null, info.name), h('span', { class: 'sub' }, info.e ? info.e.method + ' ' + info.e.url : EPS.length + ' endpoint' + (EPS.length === 1 ? '' : 's') + ' tested')),
       h('div', { class: 'kpis' },
-        tile('Requests', fmtInt(info.requests), info.e ? 'expects HTTP ' + info.e.expectedStatus.join(' or ') : null),
-        tile('Success rate', fmtPct(sr), fmtInt(info.failed) + ' failed', icon(lvl)),
-        tile('Throughput', fmtNum(info.rps, 1) + ' /s', 'requests per second'),
-        tile('Median', L ? fmtMs(L.median) : '–', L ? 'avg ' + fmtMs(L.avg) : null),
-        tile('p95', L ? fmtMs(L.p95) : '–', '95% were faster'),
-        tile('p99', L ? fmtMs(L.p99) : '–', '99% were faster'),
+        tile('Requests', fmtInt(info.requests), info.e ? 'expects HTTP ' + info.e.expectedStatus.join(' or ') : fmtNum(run.durationSec, 0) + ' s test'),
+        tile('Success rate', fmtPct(sr), fmtInt(info.failed) + ' failed', { level: level, icon: icon(level) }),
+        tile('Throughput', fmtNum(info.rps, 1) + ' /s', 'requests per second', { accent: 'var(--s1)', spark: thr && sparkline(thr.rps, 'var(--s1)') }),
+        tile('Average', L ? fmtMs(L.avg) : '–', L ? 'median ' + fmtMs(L.median) : null, { accent: 'var(--s1)', spark: ls && sparkline(ls.L.avg, 'var(--s1)') }),
+        tile('p95', L ? fmtMs(L.p95) : '–', '95% were faster', { accent: 'var(--s2)', spark: ls && sparkline(ls.L.p95, 'var(--s2)') }),
+        tile('p99', L ? fmtMs(L.p99) : '–', '99% were faster', { accent: 'var(--s3)', spark: ls && sparkline(ls.L.p99, 'var(--s3)') }),
         tile('Slowest', L ? fmtMs(L.max) : '–', L ? 'fastest ' + fmtMs(L.min) : null)),
       h('div', { class: 'caption' }, !L ? 'No request got a response, so there is no response time.'
         : info.latKind === 'ok' ? 'Response times cover successful requests only (fast error pages would flatter them).'
         : info.latKind === 'mixed' ? 'These response times include error responses (this results file predates the separate success latency).'
-        : 'No request succeeded: the response times shown belong to error responses and say nothing about real performance.'));
+        : 'No request succeeded: the response times shown belong to error responses and say nothing about real performance.')];
   }
   function obsCard(list) {
-    return h('section', { class: 'card' }, h('header', null, h('h2', null, 'What stands out')),
-      h('ul', { class: 'obs' }, list.map(function (o) { return h('li', { style: '--c:var(--' + (o.level === 'info' ? 's1' : o.level) + ')' }, icon(o.level), h('span', null, o.text)); })));
+    return h('section', { class: 'card' }, h('header', null, h('div', null, h('h2', null, 'What stands out'), h('div', { class: 'sub' }, 'Findings worked out from this run’s numbers'))),
+      h('div', { class: 'finds' }, list.map(function (o) { return h('div', { class: 'find', style: '--c:var(--' + lv(o.level) + ')' }, icon(o.level), h('span', null, o.text)); })));
   }
-  function resultChip(e) {
+  function resultPill(e) {
     var map = { OK: ['good', 'OK'], PARTIAL: ['warn', 'Partly failing'], NO_SUCCESS: ['crit', 'Failing'], NOT_RUN: ['info', 'Not called'] }, m = map[e.status] || ['info', e.status];
-    return h('span', { class: 'chip', style: '--c:var(--' + (m[0] === 'info' ? 's1' : m[0]) + ')' }, icon(m[0]), m[1]);
+    return h('span', { class: 'pill', style: '--c:var(--' + lv(m[0]) + ')' }, icon(m[0]), m[1]);
   }
   function compareCard() {
     var max = Math.max.apply(null, EPS.map(function (e) { return e.latencyOk ? e.latencyOk.p95 : 0; }).concat([1]));
     var rows = EPS.map(function (e) {
       var L = e.latencyOk || e.latencyAll;
       return h('tr', { class: 'click', onclick: function () { select(e.index); } },
-        h('td', null, h('span', { class: 'meth' }, e.method), h('button', { class: 'linklike', 'aria-label': 'Show endpoint ' + e.index }, '#' + e.index + ' ' + pathOf(e.url))),
-        h('td', null, resultChip(e)),
+        h('td', null, methBadge(e.method), h('button', { class: 'linklike', 'aria-label': 'Show endpoint ' + e.index }, '#' + e.index + ' ' + pathOf(e.url))),
+        h('td', null, resultPill(e)),
         h('td', { class: 'num' }, fmtInt(e.requests)), h('td', { class: 'num' }, fmtPct(e.successRate)), h('td', { class: 'num' }, fmtNum(e.requestsPerSec, 1)),
         h('td', { class: 'num' }, L ? fmtMs(L.median) : '–'),
-        h('td', { class: 'num' }, L ? fmtMs(L.p95) : '–', e.latencyOk ? h('div', { class: 'minibar', style: 'width:' + Math.max(2, e.latencyOk.p95 / max * 100) + '%' }) : null),
+        h('td', { class: 'num', style: 'min-width:110px' }, L ? fmtMs(L.p95) : '–', e.latencyOk ? h('div', { class: 'minibar', style: 'width:' + Math.max(3, e.latencyOk.p95 / max * 100) + '%' }) : null),
         h('td', { class: 'num' }, L ? fmtMs(L.p99) : '–'), h('td', { class: 'num' }, L ? fmtMs(L.max) : '–'));
     });
-    return h('section', { class: 'card' }, h('header', null, h('h2', null, 'Endpoints'), h('span', { class: 'sub' }, 'Click a row to open that endpoint. Latency of successful requests; of error responses where none succeeded.')),
+    return h('section', { class: 'card' }, h('header', null, h('div', null, h('h2', null, 'Endpoints'), h('div', { class: 'sub' }, 'Click a row to open that endpoint. Times are for successful requests (error responses where none succeeded).'))),
       h('div', { class: 'tablewrap' }, h('table', null,
         h('thead', null, h('tr', null, ['Endpoint', 'Result', 'Requests', 'Success', 'Req/s', 'Median', 'p95', 'p99', 'Slowest'].map(function (c, i) { return h('th', { class: i > 1 ? 'num' : '' }, c); }))),
         h('tbody', null, rows))));
   }
   function distCard(info) {
-    var L = info.lat, card = h('section', { class: 'card' }, h('header', null, h('h2', null, 'Response-time distribution'),
-      h('span', { class: 'sub' }, 'p95 = 95% of requests were faster than this' + (info.latKind === 'ok' ? '' : info.latKind === 'mixed' ? ' (includes error responses)' : ' (error responses only)'))));
+    var L = info.lat, card = h('section', { class: 'card' }, h('header', null, h('div', null, h('h2', null, 'Response-time distribution'),
+      h('div', { class: 'sub' }, 'p95 = 95% of requests were faster than this' + (info.latKind === 'ok' ? '' : info.latKind === 'mixed' ? ' (includes error responses)' : ' (error responses only)')))));
     if (!L) { card.appendChild(h('div', { class: 'muted' }, 'Nothing to show: no request got a response.')); return card; }
     var items = [['Median', L.median], ['p90', L.p90], ['p95', L.p95], ['p99', L.p99], ['Slowest', L.max]];
     if (state.view === 'tables') { card.appendChild(dataTable(['Percentile', 'Response time'], items.map(function (i) { return [i[0], fmtMs(i[1])]; }))); return card; }
     var max = Math.max.apply(null, items.map(function (i) { return i[1] || 0; }).concat([1]));
     card.appendChild(h('div', { class: 'bars' }, items.map(function (i) {
-      var row = h('div', { class: 'brow', tabindex: '0' }, h('span', { class: 'muted' }, i[0]),
-        h('div', { class: 'barea' }, h('div', { class: 'fill', style: '--k:' + (i[1] / max) }), h('span', { class: 'val' }, fmtMs(i[1]))));
+      var row = h('div', { class: 'brow' + (i[0] === 'p95' ? ' key' : ''), tabindex: '0' }, h('span', { class: 'lab' }, i[0]),
+        h('div', { class: 'track' }, h('div', { class: 'fill', style: '--k:' + (i[1] / max) })), h('span', { class: 'val' }, fmtMs(i[1])));
       attachTip(row, function () { return i[0] + ': ' + fmtMs(i[1]) + (isNum(i[1]) && i[1] >= 1000 ? ' (' + fmtNum(i[1], 0) + ' ms)' : ''); });
       return row;
     })));
@@ -456,68 +591,68 @@
     var rows = [];
     (scope === 'all' ? EPS : [EPS[scope - 1]]).forEach(function (e) {
       Object.keys(e.statusCodes || {}).sort(function (a, b) { return (Number(a) || 1e9) - (Number(b) || 1e9); }).forEach(function (code) {
-        var numeric = /^\d+$/.test(code), n = e.statusCodes[code], expected = numeric && e.expectedStatus.indexOf(Number(code)) >= 0, lv, word, name;
-        if (expected) { lv = 'good'; word = 'Expected'; } else if (code === 'noResponse') { lv = 'crit'; word = 'No response'; }
-        else if (numeric && Number(code) >= 500) { lv = 'crit'; word = 'Server error'; } else if (numeric && Number(code) >= 400) { lv = 'serious'; word = 'Client error'; }
-        else { lv = 'warn'; word = 'Unexpected'; }
+        var numeric = /^\d+$/.test(code), n = e.statusCodes[code], expected = numeric && e.expectedStatus.indexOf(Number(code)) >= 0, level, word, name;
+        if (expected) { level = 'good'; word = 'Expected'; } else if (code === 'noResponse') { level = 'crit'; word = 'No response'; }
+        else if (numeric && Number(code) >= 500) { level = 'crit'; word = 'Server error'; } else if (numeric && Number(code) >= 400) { level = 'serious'; word = 'Client error'; }
+        else { level = 'warn'; word = 'Unexpected'; }
         name = numeric ? code + ' ' + (MEANING[code] || '') : code === 'noResponse' ? 'Timeout / connection error'
           : 'Other status' + (e.badStatusRange ? ' (' + e.badStatusRange.min + (e.badStatusRange.max !== e.badStatusRange.min ? '–' + e.badStatusRange.max : '') + ')' : '');
-        rows.push({ ep: e, name: name, n: n, lv: lv, word: word });
+        rows.push({ ep: e, name: name, n: n, level: level, word: word });
       });
     });
-    var card = h('section', { class: 'card' }, h('header', null, h('h2', null, 'HTTP status codes')));
+    var card = h('section', { class: 'card' }, h('header', null, h('div', null, h('h2', null, 'HTTP status codes'), h('div', { class: 'sub' }, 'What the API answered, and whether the profile expected it'))));
     if (!rows.length) { card.appendChild(h('div', { class: 'muted' }, 'No responses recorded.')); return card; }
     var total = info.requests || 1;
-    var cols = (scope === 'all' ? ['Endpoint'] : []).concat(['Status', 'Meaning', 'Requests', 'Share']);
+    var cols = (scope === 'all' ? ['Endpoint'] : []).concat(['Status', 'Result', 'Requests', 'Share']);
     card.appendChild(h('div', { class: 'tablewrap' }, h('table', null,
       h('thead', null, h('tr', null, cols.map(function (c, i) { return h('th', { class: i >= cols.length - 2 ? 'num' : '' }, c); }))),
       h('tbody', null, rows.map(function (r) {
         return h('tr', null, scope === 'all' ? h('td', null, '#' + r.ep.index) : null,
-          h('td', null, h('span', { class: 'chip', style: '--c:var(--' + r.lv + ')' }, icon(r.lv === 'serious' ? 'warn' : r.lv), r.name)),
-          h('td', null, r.word), h('td', { class: 'num' }, fmtInt(r.n)),
-          h('td', { class: 'num' }, fmtPct(r.n / total), state.view === 'charts' ? h('div', { class: 'minibar', style: 'width:' + Math.max(2, r.n / total * 100) + '%; background:var(--' + r.lv + ')' }) : null));
+          h('td', null, r.name), h('td', null, h('span', { class: 'pill', style: '--c:var(--' + r.level + ')' }, icon(r.level === 'serious' ? 'warn' : r.level), r.word)),
+          h('td', { class: 'num' }, fmtInt(r.n)),
+          h('td', { class: 'num', style: 'min-width:84px' }, fmtPct(r.n / total), state.view === 'charts' ? h('div', { class: 'minibar', style: 'width:' + Math.max(3, r.n / total * 100) + '%; background:var(--' + r.level + ')' }) : null));
       })))));
     return card;
   }
   function timeCards(info) {
     var sr = info.sr;
     if (!S || !sr) return [h('section', { class: 'card' }, h('header', null, h('h2', null, 'Over time')),
-      h('div', { class: 'muted' }, !S ? 'The time series is not available: the k6 dashboard export was not found for this run.' : 'This run has no time series for this endpoint (it was produced by an older engine).'))];
-    var hasOk = sr.latencyOk && sr.latencyOk.avg.some(isNum), L = hasOk ? sr.latencyOk : sr.latency, x = S.t;
-    var latNote = hasOk || info.latKind === 'ok' ? 'successful requests, per ' + fmtDur(S.period) + ' window'
-      : info.latKind === 'mixed' ? 'includes error responses, per ' + fmtDur(S.period) + ' window' : 'error responses only: no request succeeded';
+      h('div', { class: 'muted' }, !S ? 'The time series is not available: the load generator’s dashboard export was not found for this run.' : 'This run has no time series for this endpoint (it was produced by an older engine).'))];
+    var ls = latSeries(info), L = ls.L, x = S.t, refs = latencyRefs();
+    var latNote = (ls.hasOk || info.latKind === 'ok' ? 'Successful requests, per ' + fmtDur(S.period) + ' window'
+      : info.latKind === 'mixed' ? 'Includes error responses, per ' + fmtDur(S.period) + ' window' : 'Error responses only: no request succeeded') + (refs.length ? '. Dashed lines are the SLA limits from the test profile.' : '');
     var list = [];
     if (L.avg.some(isNum)) {
       list.push(seriesCard('Response time over time', latNote,
         [{ label: 'Average', color: 'var(--s1)', values: L.avg }, { label: 'p95', color: 'var(--s2)', values: L.p95 }, { label: 'p99', color: 'var(--s3)', values: L.p99 }], x, fmtMs,
-        function (v) { return v === 0 ? '0' : v >= 1000 ? fmtNum(v / 1000, 1) + ' s' : fmtNum(v, 0) + ' ms'; }, { height: 240 }));
+        function (v) { return v === 0 ? '0' : v >= 1000 ? fmtNum(v / 1000, 1) + ' s' : fmtNum(v, 0) + ' ms'; }, { height: 280, refs: refs }));
     }
-    var load = h('div', { class: 'card' }, h('header', null, h('h2', null, 'Load and throughput'), h('span', { class: 'sub' }, 'when throughput stops rising while users keep rising, the API is saturated')));
+    var load = h('div', { class: 'card' }, h('header', null, h('div', null, h('h2', null, 'Load and throughput'), h('div', { class: 'sub' }, 'When throughput stops rising while users keep rising, the API is saturated'))));
     if (state.view === 'tables') {
       load.appendChild(dataTable(['Time', 'Virtual users', 'Requests/s'], x.map(function (t, i) { return [fmtDur(t), fmtInt(S.vus[i]), fmtNum(sr.rps[i], 1)]; })));
     } else {
-      var b1 = h('div', { class: 'chartbox' }), b2 = h('div', { class: 'chartbox' });
+      var b1 = h('div', { class: 'chartbox' }), b2 = h('div', { class: 'chartbox' }), stages = stageList();
       load.appendChild(h('div', { class: 'strip-title' }, 'Virtual users')); load.appendChild(b1);
       load.appendChild(h('div', { class: 'strip-title' }, info.e ? 'Requests per second (this endpoint)' : 'Requests per second')); load.appendChild(b2);
       pending.push(function () {
-        lineChart(b1, { title: 'Virtual users over time', x: x, period: S.period, series: [{ label: 'Virtual users', color: 'var(--muted)', values: S.vus }], fmt: fmtInt, tick: fmtInt, height: 110, area: true });
-        lineChart(b2, { title: 'Requests per second over time', x: x, period: S.period, series: [{ label: 'Requests/s', color: 'var(--s1)', values: sr.rps }], fmt: function (v) { return fmtNum(v, 1) + ' /s'; }, tick: function (v) { return fmtNum(v, 1); }, height: 130, area: true });
+        lineChart(b1, { title: 'Virtual users over time', x: x, period: S.period, series: [{ label: 'Virtual users', color: 'var(--muted)', values: S.vus }], fmt: fmtInt, tick: fmtInt, height: 128, top: 0.22, stages: stages, stageLabels: true });
+        lineChart(b2, { title: 'Requests per second over time', x: x, period: S.period, series: [{ label: 'Requests/s', color: 'var(--s1)', values: sr.rps }], fmt: function (v) { return fmtNum(v, 1) + ' /s'; }, tick: function (v) { return fmtNum(v, 1); }, height: 150, stages: stages });
       });
     }
     list.push(load);
     if (sr.errorPct.some(function (v) { return isNum(v) && v > 0; })) {
-      list.push(seriesCard('Errors over time', 'share of requests that did not return the expected status',
-        [{ label: 'Error rate', color: 'var(--crit)', values: sr.errorPct }], x, function (v) { return fmtNum(v, 1) + '%'; }, function (v) { return fmtNum(v, 0) + '%'; }, { height: 130, area: true }));
-    } else list.push(h('div', { class: 'card' }, h('div', { class: 'chip', style: '--c:var(--good)' }, icon('good'), 'No errors in any ' + fmtDur(S.period) + ' window.')));
+      list.push(seriesCard('Errors over time', 'Share of requests that did not return the expected status',
+        [{ label: 'Error rate', color: 'var(--crit)', values: sr.errorPct }], x, function (v) { return fmtNum(v, 1) + '%'; }, function (v) { return fmtNum(v, 0) + '%'; }, { height: 150 }));
+    } else list.push(h('div', { class: 'card' }, h('span', { class: 'pill', style: '--c:var(--good)' }, icon('good'), 'No errors in any ' + fmtDur(S.period) + ' window')));
     return list;
   }
   function thresholdCard() {
     var rows = (R.thresholds || []).map(function (t) {
       return h('tr', null, h('td', null, t.metric), h('td', null, t.rule), h('td', { class: 'num' }, thresholdObserved(t)),
-        h('td', null, h('span', { class: 'chip', style: '--c:var(' + (t.ok ? '--good' : '--crit') + ')' }, icon(t.ok ? 'good' : 'crit'), t.ok ? 'Met' : 'Not met')));
+        h('td', null, h('span', { class: 'pill', style: '--c:var(' + (t.ok ? '--good' : '--crit') + ')' }, icon(t.ok ? 'good' : 'crit'), t.ok ? 'Met' : 'Not met')));
     });
     if (!rows.length) return null;
-    return h('section', { class: 'card' }, h('header', null, h('h2', null, 'SLA thresholds'), h('span', { class: 'sub' }, 'k6 evaluates these on all endpoints together and on every response, errors included')),
+    return h('section', { class: 'card' }, h('header', null, h('div', null, h('h2', null, 'SLA thresholds'), h('div', { class: 'sub' }, 'Evaluated on all endpoints together and on every response, errors included'))),
       h('div', { class: 'tablewrap' }, h('table', null, h('thead', null, h('tr', null, ['Metric', 'Rule', 'Observed', 'Result'].map(function (c, i) { return h('th', { class: i === 2 ? 'num' : '' }, c); }))), h('tbody', null, rows))));
   }
   function timeSplitCard() {
@@ -526,13 +661,12 @@
     var parts = [{ n: 'Waiting for the server (TTFB)', v: b.waiting.avg, c: 'var(--s1)' }, { n: 'Connection set-up (blocked, incl. TLS)', v: b.blocked ? b.blocked.avg : 0, c: 'var(--s2)' },
       { n: 'Sending and receiving data', v: (b.sending ? b.sending.avg : 0) + (b.receiving ? b.receiving.avg : 0), c: 'var(--s3)' }];
     var total = parts.reduce(function (s, p) { return s + (p.v || 0); }, 0) || 1;
-    var card = h('section', { class: 'card' }, h('header', null, h('h2', null, 'Where the time goes'), h('span', { class: 'sub' }, 'average per request, all endpoints')));
+    var card = h('section', { class: 'card' }, h('header', null, h('div', null, h('h2', null, 'Where the time goes'), h('div', { class: 'sub' }, 'Average per request, all endpoints'))));
     if (state.view === 'charts') {
-      var bar = h('div', { class: 'seg8', role: 'img', 'aria-label': 'Share of the average request time' }, parts.map(function (p) { var s = h('span', { style: '--c:' + p.c + ';flex:' + Math.max(p.v / total, 0.004) }); attachTip(s, function () { return p.n + ': ' + fmtMs(p.v) + ' (' + fmtPct(p.v / total) + ')'; }); return s; }));
-      card.appendChild(bar);
+      card.appendChild(h('div', { class: 'seg8', role: 'img', 'aria-label': 'Share of the average request time' }, parts.map(function (p) { var s = h('span', { style: '--c:' + p.c + ';flex:' + Math.max(p.v / total, 0.004) }); attachTip(s, function () { return p.n + ': ' + fmtMs(p.v) + ' (' + fmtPct(p.v / total) + ')'; }); return s; })));
     }
     card.appendChild(h('div', { class: 'tablewrap' }, h('table', null, h('tbody', null, parts.map(function (p) {
-      return h('tr', null, h('td', null, h('span', { class: 'chip', style: '--c:' + p.c }, h('i', { style: 'display:inline-block;width:10px;height:10px;border-radius:2px;background:' + p.c }), p.n)), h('td', { class: 'num' }, fmtMs(p.v)), h('td', { class: 'num' }, fmtPct(p.v / total)));
+      return h('tr', null, h('td', null, h('span', { class: 'chip' }, h('i', { class: 'swatch', style: 'background:' + p.c }), p.n)), h('td', { class: 'num' }, fmtMs(p.v)), h('td', { class: 'num' }, fmtPct(p.v / total)));
     })))));
     card.appendChild(h('div', { class: 'caption' }, 'A large server share points at the API; a large connection share at the network or at connection reuse. Connection set-up mostly hits the first request of each virtual user.'));
     return card;
@@ -570,45 +704,49 @@
   function renderMain() {
     charts.length = 0; pending.length = 0; main.replaceChildren(); gtip.hidden = true;
     var info = scopeInfo(state.scope), body = [];
-    body.push(kpis(info), obsCard(observations(state.scope, info)));
+    body = body.concat(kpis(info));
+    body.push(h('div', { style: 'height:18px' }), obsCard(observations(state.scope, info)));
     if (state.scope === 'all' && EPS.length > 1) body.push(compareCard());
     body = body.concat(timeCards(info));
-    var two = h('div', { class: 'twocol' }, distCard(info), codeCard(state.scope, info));
-    body.push(two);
-    if (state.scope === 'all') { var th = thresholdCard(), ts = timeSplitCard(); if (th) body.push(th); if (ts) body.push(ts); }
-    else body.push(h('div', { class: 'caption' }, 'SLA thresholds and the time split are measured for all endpoints together: choose “All endpoints” to see them.'));
+    body.push(h('div', { class: 'twocol' }, distCard(info), codeCard(state.scope, info)));
+    if (state.scope === 'all') { var th = thresholdCard(), ts = timeSplitCard(); if (th && ts) body.push(h('div', { class: 'twocol' }, th, ts)); else { if (th) body.push(th); if (ts) body.push(ts); } }
+    else body.push(h('div', { class: 'caption', style: 'margin-bottom:18px' }, 'SLA thresholds and the time split are measured for all endpoints together: choose “All endpoints” to see them.'));
     body.push(configCard());
     body.forEach(function (n) { if (n) main.appendChild(n); });
     pending.forEach(function (fn) { fn(); });
   }
   function build() {
     var b = bannerModel(), P2 = R.profile || {};
-    var head = h('div', { class: 'head' },
-      h('div', null, h('h1', null, 'Performance test report'),
-        h('div', { class: 'sub' }, [P2.apiName, P2.artifactVersion ? 'version ' + P2.artifactVersion : null, R.generatedAt ? new Date(R.generatedAt).toLocaleString() : null,
-          isNum(run.durationSec) ? fmtDur(run.durationSec) + ' test, up to ' + fmtInt(run.vusMax) + ' virtual users' : null].filter(Boolean).join(' · '))),
-      h('button', { onclick: function () {
-        var root = document.documentElement, cur = root.getAttribute('data-theme'), next = cur === 'dark' ? 'light' : cur === 'light' ? null : 'dark';
-        if (next) root.setAttribute('data-theme', next); else root.removeAttribute('data-theme');
-        charts.forEach(function (c) { c.draw(); }); this.textContent = 'Theme: ' + (next || 'auto');
-      } }, 'Theme: auto'));
-    var banner = h('section', { class: 'card banner', style: '--c:var(--' + b.level + ')' }, icon(b.level), h('div', null, h('div', { class: 'big' }, b.title), h('div', { class: 'muted' }, b.detail)));
-    sel = h('select', { id: 'ep', onchange: function () { select(this.value === 'all' ? 'all' : Number(this.value)); } },
+    var logo = sv('svg', { viewBox: '0 0 24 24', fill: 'none', stroke: '#9cc4ff', 'stroke-width': 2, 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'aria-hidden': 'true' },
+      sv('path', { d: 'M3 17l5-6 4 3 8-9' }), sv('path', { d: 'M3 21h18' }));
+    var chips = [P2.artifactVersion ? 'Version ' + P2.artifactVersion : null, R.generatedAt ? new Date(R.generatedAt).toLocaleString() : null,
+      isNum(run.durationSec) ? fmtDur(run.durationSec) + ' test' : null, isNum(run.vusMax) ? 'up to ' + fmtInt(run.vusMax) + ' virtual users' : null, isNum(run.requests) ? fmtInt(run.requests) + ' requests' : null].filter(Boolean);
+    var hero = h('header', { class: 'hero' }, h('div', { class: 'hero-in' },
+      h('div', null, h('div', { class: 'eyebrow' }, logo, 'Performance test report'), h('h1', null, P2.apiName || 'API'), h('div', { class: 'chips' }, chips.map(function (c) { return h('span', { class: 'chip-h' }, c); }))),
+      h('div', { class: 'verdict', style: '--c:var(--' + b.level + ')' }, icon(b.level), h('div', null, h('div', { class: 'big' }, b.title), h('div', { class: 'det' }, b.detail)))));
+    sel = h('select', { id: 'ep', 'aria-label': 'Endpoint', onchange: function () { select(this.value === 'all' ? 'all' : Number(this.value)); } },
       h('option', { value: 'all' }, 'All endpoints (' + EPS.length + ')'),
       EPS.map(function (e) { return h('option', { value: String(e.index) }, epName(e) + (e.status === 'OK' ? '' : e.status === 'NO_SUCCESS' ? '  ✕ failing' : e.status === 'PARTIAL' ? '  ! errors' : '')); }));
     segCharts = h('button', { onclick: function () { state.view = 'charts'; sync(); renderMain(); } }, 'Charts');
     segTables = h('button', { onclick: function () { state.view = 'tables'; sync(); renderMain(); } }, 'Tables');
-    var filters = h('div', { class: 'filters', role: 'group', 'aria-label': 'Report filters' },
-      h('label', null, 'Endpoint', sel), h('label', null, 'View', h('span', { class: 'seg' }, segCharts, segTables)));
-    app.appendChild(head); app.appendChild(banner); app.appendChild(filters); app.appendChild(main);
-    app.appendChild(h('footer', null,
-      h('div', null, 'Load generated with ', ext(K6_DOCS, 'Grafana k6'), M.k6Version ? ' ' + M.k6Version : '', ', open-source software by Grafana Labs, licensed under the ', ext(K6_LICENSE, 'GNU AGPL-3.0'), '. ', ext(K6_REPO, 'Source code'), '.'),
-      h('div', null, 'Report generated by the performance pipeline · data schema ' + (R.schema || 'unknown') + (S ? '' : ' · no time series'))));
+    var themeBtn = h('button', { class: 'btn', onclick: function () {
+      var root = document.documentElement, cur = root.getAttribute('data-theme'), next = cur === 'dark' ? 'light' : cur === 'light' ? null : 'dark';
+      if (next) root.setAttribute('data-theme', next); else root.removeAttribute('data-theme');
+      this.textContent = 'Theme: ' + (next || 'auto');
+    } }, 'Theme: auto');
+    var toolbar = h('div', { class: 'toolbar', role: 'group', 'aria-label': 'Report filters' },
+      h('label', null, 'Endpoint', sel), h('label', null, 'View', h('span', { class: 'seg' }, segCharts, segTables)), h('span', { class: 'grow' }),
+      themeBtn, h('button', { class: 'btn', onclick: function () { window.print(); } }, 'Print / PDF'));
+    var page = h('div', { class: 'page' }, toolbar, main,
+      h('footer', null,
+        h('div', null, 'Load generated with ', ext(K6_DOCS, 'Grafana k6'), M.k6Version ? ' ' + M.k6Version : '', ', open-source software by Grafana Labs, licensed under the ', ext(K6_LICENSE, 'GNU AGPL-3.0'), '. ', ext(K6_REPO, 'Source code'), '.'),
+        h('div', null, 'Report generated by the performance pipeline · data schema ' + (R.schema || 'unknown') + (S ? '' : ' · no time series'))));
+    app.appendChild(hero); app.appendChild(page);
     sync(); renderMain();
   }
   var timer; window.addEventListener('resize', function () { clearTimeout(timer); timer = setTimeout(function () { charts.forEach(function (c) { c.draw(); }); }, 120); });
   window.addEventListener('hashchange', function () { var m = /ep=(\d+)/.exec(location.hash); state.scope = m && EPS[Number(m[1]) - 1] ? Number(m[1]) : 'all'; sync(); renderMain(); });
-  try { build(); } catch (err) { app.appendChild(h('pre', { style: 'white-space:pre-wrap;color:var(--crit)' }, 'The report could not be drawn: ' + err.message)); }
+  try { build(); } catch (err) { app.appendChild(h('pre', { style: 'white-space:pre-wrap;color:var(--crit);padding:20px' }, 'The report could not be drawn: ' + err.message)); }
 })();
 </script>
 </body>

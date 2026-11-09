@@ -125,7 +125,7 @@ What the page shows, and why only this:
 | Distribution, status codes | percentile bars; every status code with its meaning, count and share |
 | SLA thresholds, time split (all view) | each k6 threshold with the observed value; server time vs connection set-up vs transfer |
 
-Design rules: one y-axis per chart (no dual axis), colours from a validated palette (light and dark, follows the OS or the Theme button), a Charts/Tables switch that shows the same data as tables, a crosshair that moves in all charts together, keyboard arrows on a focused chart. Open it locally: `python report/build_report.py --results results.json --dashboard k6-dashboard.html --out report.html`.
+Look and design rules: a branded header with the result, a sticky toolbar, KPI tiles with a small trend line each, a soft gradient wash under every line, one y-axis per chart (no dual axis), colours from a validated palette (light and dark, follows the OS or the Theme button), a Charts/Tables switch that shows the same data as tables, a crosshair that moves in all charts together, keyboard arrows on a focused chart, Print / PDF button. Two analysis aids come from the test profile: dashed **SLA limit lines** (the k6 thresholds) on the response-time chart, and **load-stage markers** (ramp up / hold / ramp down) on the time charts. Open it locally: `python report/build_report.py --results results.json --dashboard k6-dashboard.html --out report.html`.
 
 ## 4. Credential contract (the part that must stay the same)
 
