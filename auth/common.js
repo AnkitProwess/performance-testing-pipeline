@@ -3,8 +3,12 @@
 // Records WHY a run is about to stop, in one machine-readable log line: PERF_REASON|<CODE>|<text>.
 // ci/run-k6.sh picks the first such line out of the k6 output and ci/status.sh puts it in the email, so the text must only state
 // facts the engine actually knows (a status code, a missing key name, the IdP's error code) and never contain a secret, a token or a request body.
+export function cleanReason(text) {
+    return String(text).replace(/[|"\\\r\n]+/g, ' ').slice(0, 400);
+}
+
 export function emitReason(code, text) {
-    const clean = String(text).replace(/[|"\\\r\n]+/g, ' ').slice(0, 400);
+    const clean = cleanReason(text);
     console.error(`PERF_REASON|${code}|${clean}`);
     return clean;
 }

@@ -56,7 +56,7 @@ Run parameters (same names in both tools):
 |---|---|---|---|
 | `0` | All thresholds met | green | `[PASSED]` |
 | `99` | The test ran, but an SLA threshold (latency / error rate) was crossed | **green with a warning** (Azure: "succeeded with issues"; Jenkins: yellow stage, build stays SUCCESS) | `[PASSED]` (green) with the message **"SLA MISSED: ..."** below it |
-| `108` | The engine **stopped the run early** (see the reasons below) | **red** | `[FAILED]` + the exact reason |
+| `108` | The engine **stopped the run**, or the run finished but **an endpoint never succeeded** (see the reasons below) | **red** | `[FAILED]` + the exact reason (report attached when one exists) |
 | `107` | The test could not start: setup or script error (see the reasons below) | **red** | `[FAILED]` + the exact reason |
 | anything else | The test could not run (Docker error, killed process, ...) | **red** | `[FAILED]` + what the exit code proves |
 
@@ -64,7 +64,9 @@ Notes:
 
 - `FAILED` is reserved for "the test could not run". An SLA miss is shown as `PASSED` (the test itself worked) with an "SLA MISSED" message under the result, so read that line, not just the subject.
 - **Wrong credentials fail the build.** If any request gets 401 or 403 (and the profile did not set `expectedStatus` to that code), the engine aborts the run at once. Previously a 100%-failed run only crossed a threshold and looked like an SLA miss.
-- **A run where nothing succeeds fails the build too.** If a VU makes 10 requests and none returns the expected status (404 from a wrong URL, 500, host unreachable), the engine aborts the same way. Without this, such a run only crossed the failed-request threshold (exit 99) and looked like an SLA miss. Once at least one request has succeeded, later errors are *not* aborted: they count towards the thresholds, so a real degradation is still reported as an SLA miss.
+- **Multi-endpoint profiles: the run always completes once the API answers.** 404, 409, 400, 5xx on one endpoint never stop the test, so every endpoint is exercised and the report is generated. Only two things stop a run early (no useful report): rejected credentials (401/403) and an API that never answers at all (10 requests in a row without any HTTP response).
+- **An endpoint that never succeeds fails the build, but with the report.** At the end of the run the engine checks every endpoint. If one had requests but **zero** responses with its `expectedStatus` (wrong URL, 409 on every PUT, 400 for a bad body, ...), the result is `[FAILED]` (exit 108 via `ci/run-k6.sh`) and the report is attached. An endpoint that fails only *some* of the time is an SLA matter: the thresholds decide (99 = `PASSED` + "SLA MISSED"). If a status other than 200 is the correct answer for an endpoint, set `expectedStatus` to it (a number or a list, e.g. `[200, 409]`); it is then neither a failed request nor a failure of the endpoint.
+- The k6 log ends with a per-endpoint table (requests, how many returned the expected status, which HTTP codes came back instead) and the threshold results. The report's *checks* are named per endpoint (`PUT <url> returns 200`).
 - Each email shows the label and a one-line reason (next section). If the test never got as far as generating load, there is no report attached and the email says so.
 - Rules live in `ci/status.sh` and `ci/run-k6.sh`. Changing them changes both tools.
 
@@ -75,13 +77,14 @@ The same exit code can have several causes (108 covers both rejected credentials
 | Reason code | Email says (summary) |
 |---|---|
 | `CREDENTIALS_REJECTED` | The API answered HTTP 401 (not authenticated) / 403 (not permitted) for `GET <url>`; the credentials or token were not accepted. Check they are correct, not expired and allowed to call this API. |
-| `NO_SUCCESS` | None of the first 10 requests of a virtual user returned the expected status; the last one got HTTP 404 (not found) / 5xx (server error) / no HTTP response. Followed by a matching hint (check the URL, the API's logs, or the network). |
+| `NO_RESPONSE` | The first 10 requests of a virtual user got no HTTP response at all: the API was never reached. Check the host name, network and that the API is running. |
+| `ENDPOINT_NO_SUCCESS` | The test ran to the end and the report is attached, but the named endpoint(s) never returned the expected status (shows the HTTP codes that came back). The API answered, so the credentials were accepted. Check URL, method, payload and `expectedStatus`. |
 | `TOKEN_REQUEST_FAILED` | The identity provider answered the OAuth token request with HTTP N (error: `invalid_client`, ...). Check the token URL, client ID, client secret (not expired) and scope. Or: the token URL could not be reached. |
 | `TOKEN_RESPONSE_INVALID` | The token request returned HTTP 200 but no `access_token`. |
 | `MISSING_VALUE` | The value `authParameters.<key>` was not supplied: missing from the profile, or its variable group / Jenkins credential does not exist or is empty. |
 | `PROFILE_NOT_FOUND` / `PROFILE_INVALID` | The profile could not be read (check `apiName`, `profileName`, branch) / is not valid JSON. |
 | `UNKNOWN_AUTH_TYPE` | The `authType` is not one of the supported values (lists them). |
-| *(no reason captured)* | Only what the exit code proves: 107 "could not start or crashed with a script error", 108 "stopped early by the engine", 125-127 "Docker could not start the container", 137 "killed, which usually means out of memory", otherwise "could not complete (exit code N)". All point to the k6 step log. |
+| *(no reason captured)* | Only what the exit code proves: 107 "could not start or crashed with a script error", 108 "stopped or judged failed by the engine", 125-127 "Docker could not start the container", 137 "killed, which usually means out of memory", otherwise "could not complete (exit code N)". All point to the k6 step log. |
 
 Wording rule: say what was observed ("the API answered HTTP 401"), then what to check, and never claim a cause that was not observed. For example a 401 is reported as "credentials or token not accepted", not as "wrong password".
 
@@ -168,7 +171,8 @@ The profile lives in the API repo (`<apiName>/<profileName>`); the API repo need
   | `CLIENT_ID_ENFORCEMENT` | `clientId`, `clientSecret` | sent as `client_id` / `client_secret` headers |
   | `BASIC` | `username`, `password` | `Authorization: Basic base64(user:pass)` |
 
-- Consecutive endpoints with the same `batchGroup` run in parallel. `expectedStatus` defaults to 200. Old profiles that put `{{CLIENT_ID}}` straight into endpoint headers still work.
+- Per endpoint: `method`, `payload` (object or string, for POST/PUT/PATCH), `headers`, `expectedStatus` (number or list, default 200), `sleepDuration`, optional `name` (label used in checks and logs). Example with two methods: `sample-api/AI_innovation_poc1/load-profile5-multi-put-nulls.json`.
+- Consecutive endpoints with the same `batchGroup` run in parallel. Old profiles that put `{{CLIENT_ID}}` straight into endpoint headers still work.
 - Other examples: `templates/load-profile*.json`.
 
 ## 8. Adding a new auth type

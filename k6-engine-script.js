@@ -1,8 +1,9 @@
 import http from 'k6/http';
 import { check, sleep } from 'k6';
 import exec from 'k6/execution';
+import { Counter, Trend } from 'k6/metrics';
 import { getAuthHandler } from './auth/index.js';
-import { emitReason } from './auth/common.js';
+import { emitReason, cleanReason } from './auth/common.js';
 
 // Read configuration
 const loadProfilePath = __ENV.LOAD_PROFILE_PATH || './load-profile.json';
@@ -34,6 +35,7 @@ const defaultThresholds = {
 export const options = {
     stages: config.stages,
     thresholds: config.thresholds || defaultThresholds,
+    summaryTrendStats: ['avg', 'min', 'med', 'max', 'p(90)', 'p(95)', 'p(99)'], // p(99) is not in k6's default list
 };
 
 // Authentication is pluggable: each authType lives in its own module under ./auth (see auth/index.js).
@@ -70,6 +72,32 @@ for (const ep of config.endpoints || []) {
     authByEndpoint.set(ep, resolveAuth(ep));
 }
 
+// A response counts as a success when its status is one of expectedStatus (a number, or a list of numbers; default 200)
+function expectedList(ep) {
+    const value = ep.expectedStatus !== undefined ? ep.expectedStatus : 200;
+    return Array.isArray(value) ? value : [value];
+}
+
+// What an endpoint is called in checks, logs and the verdict: its optional "name", else "METHOD url" (no query string: it may carry secrets)
+function endpointLabel(ep) {
+    return ep.name || `${(ep.method || 'GET').toUpperCase()} ${String(ep.endpoint).split('?')[0]}`;
+}
+
+// Per-endpoint results, so one endpoint failing while another passes is visible (summary below, k6-verdict.txt, and the checks in the report).
+// Metric names are index-based because they must be plain identifiers.
+const endpointStats = new Map();
+(config.endpoints || []).forEach((ep, i) => {
+    const n = i + 1;
+    endpointStats.set(ep, {
+        label: endpointLabel(ep),
+        expected: expectedList(ep),
+        requests: new Counter(`ep${n}_requests`),
+        ok: new Counter(`ep${n}_ok`),
+        noResponse: new Counter(`ep${n}_no_response`),
+        badStatus: new Trend(`ep${n}_bad_status`), // only unexpected HTTP statuses; min / max show which codes came back
+    });
+});
+
 // Reusable Helper: Prepare request configurations
 function prepareRequestSpec(ep, authStates) {
     const method = (ep.method || 'GET').toUpperCase();
@@ -79,7 +107,12 @@ function prepareRequestSpec(ep, authStates) {
     if (authRef) {
         authRef.handler.apply(headers, authRef.authParameters, authStates ? authStates[authRef.index] : null);
     }
-    const params = { headers: headers };
+    // The profile decides what a success is: an expectedStatus of 404 or 409 is then not counted as a failed request (http_req_failed)
+    const params = {
+        headers: headers,
+        tags: { name: endpointLabel(ep) }, // groups the metrics per endpoint instead of per URL
+        responseCallback: http.expectedStatuses(...expectedList(ep)),
+    };
 
     let body = null;
     if (['POST', 'PUT', 'PATCH', 'DELETE', 'QUERY'].includes(method)) {
@@ -109,52 +142,118 @@ function executeSingleRequest(ep, authStates) {
 }
 
 // Reusable Helper: Validate response status
-const NO_SUCCESS_LIMIT = 10; // requests a VU may make without a single expected response before the run is judged invalid
+//
+// Rules (README section 3):
+//  - 401 / 403 that the profile did not expect: the credentials are not accepted, the whole run is meaningless -> stop at once (exit 108).
+//  - No HTTP response at all for the first NO_RESPONSE_LIMIT requests of a VU: the API was never reached -> stop (exit 108).
+//  - Anything else (404, 409, 400, 5xx, ...) means the API answered and the credentials work. The run CONTINUES so the report covers every endpoint;
+//    handleSummary() then flags an endpoint that never succeeded (see below).
+const NO_RESPONSE_LIMIT = 10;
 let vuRequests = 0;
-let vuSuccesses = 0;
+let vuResponses = 0;
 
 // Stops the whole test. k6 exits with 108, which the pipelines treat as "the test could not run" (red build, email says FAILED).
 // The reason line is what the email shows, so it only states what is known.
+const stoppedEarly = new Counter('perf_stopped_early'); // lets handleSummary() know the run was aborted (it then states no verdict of its own)
+
 function abortRun(code, text) {
+    stoppedEarly.add(1);
     exec.test.abort(emitReason(code, text));
 }
 
-function describeStatus(status) {
-    if (status === 0) return 'no HTTP response (the connection failed)';
-    if (status === 404) return 'HTTP 404 (not found)';
-    if (status >= 500) return `HTTP ${status} (server error)`;
-    return `HTTP ${status}`;
-}
-
-function nextStepHint(status) {
-    if (status === 0) return 'Check the host name, network access and that the API is running.';
-    if (status === 404) return 'Check the endpoint URL / path and that the API is deployed.';
-    if (status >= 500) return 'The API itself is failing; check its logs.';
-    return 'Check the endpoint URL, the request method / payload and expectedStatus in the profile.';
-}
-
 function checkResponse(res, ep) {
-    const expectedStatus = ep.expectedStatus || 200;
+    const stats = endpointStats.get(ep);
+    const ok = stats.expected.includes(res.status);
     check(res, {
-        [`status is ${expectedStatus}`]: (r) => r.status === expectedStatus,
+        [`${stats.label} returns ${stats.expected.join(' or ')}`]: () => ok,
     });
 
-    const where = `${(ep.method || 'GET').toUpperCase()} ${String(ep.endpoint).split('?')[0]}`; // no query string: it may carry secrets
+    stats.requests.add(1);
+    if (ok) {
+        stats.ok.add(1);
+    } else if (res.status === 0) {
+        stats.noResponse.add(1);
+    } else {
+        stats.badStatus.add(res.status);
+    }
 
     // Rejected credentials make the whole run meaningless (every request is turned away), and as a threshold miss it would pass for an SLA miss (exit 99).
     // A profile that deliberately expects 401/403 is left alone.
-    if ((res.status === 401 || res.status === 403) && res.status !== expectedStatus) {
-        abortRun('CREDENTIALS_REJECTED', `The API answered HTTP ${res.status} (${res.status === 401 ? 'not authenticated' : 'not permitted'}) for ${where}, so the credentials or token were not accepted. Check that they are correct, not expired, and allowed to call this API.`);
+    if (!ok && (res.status === 401 || res.status === 403)) {
+        abortRun('CREDENTIALS_REJECTED', `The API answered HTTP ${res.status} (${res.status === 401 ? 'not authenticated' : 'not permitted'}) for ${stats.label}, so the credentials or token were not accepted. Check that they are correct, not expired, and allowed to call this API.`);
     }
 
-    // A run where nothing ever succeeds is not an SLA miss either: it would only cross the failed-request threshold (exit 99) and look like a pass with a warning.
-    // Counters are per VU (each VU has its own copy of this module). Failures after a first success are NOT aborted: they count towards the thresholds.
+    // Nothing answered at all: wrong host, network or API down. Per VU (each VU has its own copy of this module).
     vuRequests++;
-    if (res.status === expectedStatus) {
-        vuSuccesses++;
-    } else if (vuSuccesses === 0 && vuRequests >= NO_SUCCESS_LIMIT) {
-        abortRun('NO_SUCCESS', `None of the first ${vuRequests} requests of a virtual user returned the expected HTTP ${expectedStatus}; the last one got ${describeStatus(res.status)} from ${where}. ${nextStepHint(res.status)}`);
+    if (res.status !== 0) {
+        vuResponses++;
+    } else if (vuResponses === 0 && vuRequests >= NO_RESPONSE_LIMIT) {
+        abortRun('NO_RESPONSE', `The first ${vuRequests} requests of a virtual user got no HTTP response (last: ${stats.label}), so the API was never reached. Check the host name, network access and that the API is running.`);
     }
+}
+
+// Runs once at the end of the test (also after an abort). Replaces k6's default console summary with one that lists every endpoint, and writes
+// the verdict file that ci/run-k6.sh reads: when an endpoint NEVER returned its expected status although the API answered (wrong URL, 409 conflict,
+// 400 bad body, 5xx ...), the run is still fully reported but must not be called a pass. An endpoint that only partly fails is left to the thresholds.
+export function handleSummary(data) {
+    const count = (name) => (data.metrics[name] && data.metrics[name].values.count) || 0;
+    const lines = ['', '==== Performance test summary ===='];
+    const problems = [];
+
+    const failed = data.metrics.http_req_failed && data.metrics.http_req_failed.values;
+    const duration = data.metrics.http_req_duration && data.metrics.http_req_duration.values;
+    lines.push(`requests: ${count('http_reqs')}, failed (unexpected status): ${failed ? (failed.rate * 100).toFixed(2) : 'n/a'}%`);
+    if (duration) {
+        const ms = (v) => (typeof v === 'number' ? v.toFixed(0) : 'n/a');
+        lines.push(`latency ms: avg ${ms(duration.avg)}, p90 ${ms(duration['p(90)'])}, p95 ${ms(duration['p(95)'])}, p99 ${ms(duration['p(99)'])}, max ${ms(duration.max)}`);
+    }
+
+    lines.push('', 'Endpoints:');
+    let index = 0;
+    for (const ep of config.endpoints || []) {
+        index++;
+        const stats = endpointStats.get(ep);
+        const requests = count(`ep${index}_requests`);
+        const okCount = count(`ep${index}_ok`);
+        const noResponse = count(`ep${index}_no_response`);
+        const bad = data.metrics[`ep${index}_bad_status`] && data.metrics[`ep${index}_bad_status`].values;
+        const expected = stats.expected.join(' or ');
+        const badText = bad && bad.count > 0 ? `HTTP ${bad.min === bad.max ? bad.min : bad.min + '-' + bad.max}` : '';
+        let detail = '';
+        if (badText) {
+            detail += `, ${badText} x${bad.count}`;
+        }
+        if (noResponse > 0) {
+            detail += `, no response x${noResponse}`;
+        }
+        lines.push(`  ${okCount > 0 || requests === 0 ? 'OK  ' : 'FAIL'} ${stats.label}: ${requests} requests, ${okCount} returned ${expected}${detail}`);
+        if (requests > 0 && okCount === 0) {
+            problems.push(noResponse === requests
+                ? `${stats.label} got no HTTP response in any of ${requests} requests`
+                : `${stats.label} never returned the expected HTTP ${expected} in ${requests} requests (got ${badText || 'no HTTP response'})`);
+        }
+    }
+
+    lines.push('', 'Thresholds:');
+    for (const name of Object.keys(data.metrics)) {
+        const thresholds = data.metrics[name].thresholds || {};
+        for (const rule of Object.keys(thresholds)) {
+            lines.push(`  ${thresholds[rule] && thresholds[rule].ok === false ? 'FAIL' : 'OK  '} ${name}: ${rule}`);
+        }
+    }
+
+    let verdict = '';
+    if (count('perf_stopped_early') > 0) {
+        lines.push('', 'The run was stopped early by the engine; the reason is the PERF_REASON line in the log above.');
+    } else if (problems.length > 0) {
+        verdict = `PERF_REASON|ENDPOINT_NO_SUCCESS|${cleanReason(`The test ran and the report is attached, but not every endpoint worked: ${problems.join('; ')}. The API answered, so the credentials were accepted. Check the URL, method, payload and expectedStatus of the endpoint(s) in the profile.`)}`;
+        lines.push('', `VERDICT: ${verdict.split('|')[2]}`);
+    }
+    lines.push('');
+
+    const out = { stdout: lines.join('\n') };
+    out[__ENV.K6_VERDICT_FILE || '/apps/k6-verdict.txt'] = verdict; // empty file = every endpoint succeeded at least once
+    return out;
 }
 
 // Pre-process endpoints into execution flow steps (consecutive matching batchGroups run in parallel)

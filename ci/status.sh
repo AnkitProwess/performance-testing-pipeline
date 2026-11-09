@@ -23,7 +23,7 @@ case "$code" in
   0)   label="PASSED";     detail="All thresholds were met." ;;
   99)  label="PASSED";     detail="SLA MISSED: the test ran, but one or more SLA thresholds (latency / error rate) were crossed. See the attached report." ;;
   107) label="FAILED";     detail="The test could not start or crashed with a script error. The reason was not captured; see the k6 step log." ;;
-  108) label="FAILED";     detail="The test was stopped early by the engine. The reason was not captured; see the k6 step log." ;;
+  108) label="FAILED";     detail="The test was stopped or judged failed by the engine. The reason was not captured; see the k6 step log." ;;
   125|126|127)
        label="FAILED";     detail="Docker could not start the k6 container (exit code $code). Check that Docker is available on the agent; see the step log." ;;
   137) label="FAILED";     detail="The k6 process was killed (exit code 137), which usually means the agent ran out of memory. See the step log." ;;

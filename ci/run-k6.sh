@@ -12,6 +12,7 @@
 # never as values on the command line. A name that is not set on the host is simply not passed on.
 # Writes <api-repo-dir>/k6-reason.txt when the engine stated why it stopped (empty otherwise).
 # Exit code = k6's exit code: 0 passed, 99 thresholds crossed, anything else = the test could not run.
+# One remap: 0 / 99 become 108 when an endpoint never returned its expected status (the report is still produced).
 
 API_DIR="${1:?api-repo-dir missing}"
 PROFILE_REL="${2:?profile path missing}"
@@ -42,7 +43,8 @@ docker pull -q "$K6_IMAGE" > /dev/null || echo "Could not pull $K6_IMAGE, using 
 # The engine logs one line "PERF_REASON|<CODE>|<text>" just before it stops a run (see auth/common.js, emitReason). The output is copied to a
 # temporary file (outside the workspace, deleted below) so the FIRST such line can be kept in k6-reason.txt for ci/status.sh and the email.
 REASON_FILE="$API_DIR/k6-reason.txt"
-rm -f "$REASON_FILE"
+VERDICT_FILE="$API_DIR/k6-verdict.txt"   # written by the engine's handleSummary(): empty = every endpoint succeeded at least once
+rm -f "$REASON_FILE" "$VERDICT_FILE"
 K6_LOG="$(mktemp)"
 
 docker run --rm \
@@ -50,13 +52,23 @@ docker run --rm \
   -v "$API_DIR:/apps" \
   -e K6_WEB_DASHBOARD=true \
   -e K6_WEB_DASHBOARD_EXPORT=/apps/report.html \
-  -e LOAD_PROFILE_PATH="/apps/$PROFILE_REL" \
+  -e LOAD_PROFILE_PATH="/apps/$PROFILE_REL"   -e K6_VERDICT_FILE=/apps/k6-verdict.txt \
   "${ENV_ARGS[@]}" \
   "$K6_IMAGE" run "${K6_ARGS[@]}" /apps/k6-engine-script.js 2>&1 | tee "$K6_LOG"
 K6_EXIT=${PIPESTATUS[0]}
 
 grep -o 'PERF_REASON|[A-Z_]*|[^"]*' "$K6_LOG" | head -n 1 > "$REASON_FILE"
 rm -f "$K6_LOG"
+
+# The run finished and the report exists, but an endpoint NEVER returned its expected status although the API answered (wrong URL, 409, 400, 5xx ...).
+# That is not a pass and not an SLA miss: report it as a failed run (108) with the engine's reason, and keep the report for the email.
+# Only 0 / 99 are remapped; a run that stopped for another reason keeps its own code and reason.
+if { [ "$K6_EXIT" = "0" ] || [ "$K6_EXIT" = "99" ]; } && [ -s "$VERDICT_FILE" ]; then
+  head -n 1 "$VERDICT_FILE" | grep -o 'PERF_REASON|[A-Z_]*|.*' > "$REASON_FILE"
+  echo "An endpoint never succeeded: k6 exit code $K6_EXIT is reported as 108 (report kept)."
+  K6_EXIT=108
+fi
+rm -f "$VERDICT_FILE"
 
 echo "k6 exit code: $K6_EXIT (0 = passed, 99 = SLA thresholds crossed, other = test could not run)"
 exit $K6_EXIT
