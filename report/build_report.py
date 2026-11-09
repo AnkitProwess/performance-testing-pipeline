@@ -5,7 +5,8 @@ optionally, the k6 web-dashboard export (k6-dashboard.html) which holds the time
     python report/build_report.py --results api-repo/results.json --dashboard api-repo/k6-dashboard.html \
         --out api-repo/report.html --status PASSED --detail "SLA MISSED: ..." --build-url https://...
 
-Python standard library only. The output has no external requests (no CDN, no fonts), so it also opens offline and as an email attachment.
+Python standard library only. The output is self-contained (inline CSS, JS and SVG). Its only external request is the optional Inter web font
+(three <link> lines in report-template.html); offline, or with those lines removed, it falls back to the system UI font.
 Never fails the pipeline: on any problem it prints a warning and exits 0 without a report.
 """
 import argparse

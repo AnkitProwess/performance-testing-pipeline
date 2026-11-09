@@ -108,7 +108,7 @@ Notes: status code counts are exact for the codes 200, 201, 202, 204, 301, 302, 
 
 ### The report (report.html)
 
-`report/build_report.py` turns `results.json` (numbers) and the dashboard export `k6-dashboard.html` (the time series, one point per 5 s window) into **one self-contained HTML file**, `report.html`: no external requests, so it opens offline and as an email attachment. It is the only file that is published and the only one attached to the email; `k6-dashboard.html` and `results.json` stay in the workspace as inputs. Python standard library only. It never fails the build: on a problem it prints a warning and the pipeline carries on.
+`report/build_report.py` turns `results.json` (numbers) and the dashboard export `k6-dashboard.html` (the time series, one point per 5 s window) into **one self-contained HTML file**, `report.html`: everything is inline (CSS, JS, SVG charts), so it opens offline and as an email attachment. The one optional external request is the Inter web font (three `<link>` lines at the top of `report/report-template.html`); offline, or with those lines deleted, the report uses the system UI font. It is the only file that is published and the only one attached to the email; `k6-dashboard.html` and `results.json` stay in the workspace as inputs. Python standard library only. It never fails the build: on a problem it prints a warning and the pipeline carries on.
 
 What the page shows, and why only this:
 
