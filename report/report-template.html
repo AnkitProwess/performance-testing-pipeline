@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="light">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -30,20 +30,7 @@
     --s1: #5b5fe0; --s2: #0f9f8f; --s3: #c9791a;
     --good: #0e9f6e; --warn: #dba10f; --serious: #e5703a; --crit: #dc4a50;
   }
-  @media (prefers-color-scheme: dark) {
-    :root:where(:not([data-theme="light"])) {
-      color-scheme: dark;
-      --page: #07080b; --surface: #0e1014; --raise: #1a1e26; --wash: #12151a; --cardtop: rgba(255,255,255,.028);
-      --ink: #eceef3; --ink2: #a8afbd; --muted: #7d8697;
-      --border: rgba(255,255,255,.10); --border2: rgba(255,255,255,.18);
-      --grid: rgba(255,255,255,.065); --axis: rgba(255,255,255,.15); --track: rgba(255,255,255,.075); --hover: rgba(255,255,255,.04);
-      --shadow: inset 0 1px 0 rgba(255,255,255,.04), 0 10px 28px -10px rgba(0,0,0,.7);
-      --shadow-lg: 0 20px 56px -10px rgba(0,0,0,.8), 0 0 0 1px rgba(255,255,255,.05);
-      --glow1: rgba(112,116,236,.20); --glow2: rgba(20,162,148,.10); --gridline: rgba(255,255,255,.04);
-      --s1: #7074ec; --s2: #14a294; --s3: #c8842a;
-      --good: #2fc08a; --warn: #eab33c; --serious: #f0884f; --crit: #ef6a6e;
-    }
-  }
+  /* Light is the default. The Dark button in the toolbar sets data-theme="dark" (the report never follows the operating system). */
   :root[data-theme="dark"] {
     color-scheme: dark;
     --page: #07080b; --surface: #0e1014; --raise: #1a1e26; --wash: #12151a; --cardtop: rgba(255,255,255,.028);
@@ -182,7 +169,7 @@
   /* ---------- charts ---------- */
   .grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-bottom: 16px; }
   .grid2 > .card { margin-bottom: 0; }
-  .grid2 > :last-child:nth-child(odd) { grid-column: 1 / -1; }
+  .grid2 > :last-child:nth-child(odd), .grid2 > .wide { grid-column: 1 / -1; }
   .chartbox { position: relative; }
   .chartbox svg { display: block; width: 100%; overflow: visible; }
   .clegend { display: flex; align-items: flex-start; gap: 6px 16px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--grid); font-size: 12px; color: var(--ink2); min-height: 38px; }
@@ -193,8 +180,8 @@
   .clegend .key, .tip .key { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--c); box-shadow: 0 0 0 3px color-mix(in srgb, var(--c) 20%, transparent); flex: none; }
   .grid2 > .card { display: flex; flex-direction: column; }
   .grid2 > .card .chartbox { flex: 1; }
-  .empty { flex: 1; min-height: 200px; display: grid; place-content: center; justify-items: center; gap: 9px; color: var(--ink2); font-size: 12.5px; text-align: center; border: 1px dashed var(--border2); border-radius: 10px; background: var(--wash); }
-  .empty .ico { width: 28px; height: 28px; } .empty .ico svg { width: 14px; height: 14px; }
+  .grid2 > .okrow { flex-direction: row; align-items: center; gap: 12px; padding: 14px 18px; }
+  .okrow .ico { width: 26px; height: 26px; } .okrow .ico svg { width: 13px; height: 13px; }
   .tip { position: absolute; pointer-events: none; z-index: 4; min-width: 150px; background: var(--raise); border: 1px solid var(--border2); border-radius: 10px; padding: 8px 11px 9px; font-size: 12px; white-space: nowrap;
     box-shadow: 0 14px 34px -8px rgba(2,6,23,.34), 0 3px 8px rgba(2,6,23,.10); transition: left .12s cubic-bezier(.2,.8,.2,1), top .12s cubic-bezier(.2,.8,.2,1); animation: tipin .14s ease-out; }
   @supports (background: color-mix(in srgb, red 10%, white)) { .tip { background: color-mix(in srgb, var(--raise) 90%, transparent); -webkit-backdrop-filter: blur(12px) saturate(1.4); backdrop-filter: blur(12px) saturate(1.4); } }
@@ -331,18 +318,9 @@
     var paths = ICON_PATHS[level] || ICON_PATHS.info;
     return h('span', { class: 'ico ' + level, 'aria-hidden': 'true' }, sv.apply(null, ['svg', { viewBox: '0 0 24 24' }].concat(paths.map(function (d) { return sv('path', { d: d }); }))));
   }
-  // monotone cubic curve through the points: smooth like a commercial chart, but it never overshoots the data (no invented peaks or dips)
-  function curve(pts) {
-    var n = pts.length, f = function (v) { return +v.toFixed(2); };
-    if (!n) return '';
-    if (n === 1) return 'M' + f(pts[0][0]) + ' ' + f(pts[0][1]);
-    var dx = [], m = [], t = [], i;
-    for (i = 0; i < n - 1; i++) { dx[i] = pts[i + 1][0] - pts[i][0]; m[i] = dx[i] ? (pts[i + 1][1] - pts[i][1]) / dx[i] : 0; }
-    t[0] = m[0]; t[n - 1] = m[n - 2];
-    for (i = 1; i < n - 1; i++) t[i] = m[i - 1] * m[i] <= 0 ? 0 : 3 * (dx[i - 1] + dx[i]) / ((2 * dx[i] + dx[i - 1]) / m[i - 1] + (dx[i] + 2 * dx[i - 1]) / m[i]);
-    var d = 'M' + f(pts[0][0]) + ' ' + f(pts[0][1]);
-    for (i = 0; i < n - 1; i++) { var k = dx[i] / 3; d += 'C' + f(pts[i][0] + k) + ' ' + f(pts[i][1] + t[i] * k) + ' ' + f(pts[i + 1][0] - k) + ' ' + f(pts[i + 1][1] - t[i + 1] * k) + ' ' + f(pts[i + 1][0]) + ' ' + f(pts[i + 1][1]); }
-    return d;
+  // straight segments between samples: every point is one aggregated window, so a straight line never implies values that were not measured
+  function linePath(pts) {
+    return pts.map(function (p, i) { return (i ? 'L' : 'M') + (+p[0].toFixed(2)) + ' ' + (+p[1].toFixed(2)); }).join('');
   }
   // split a value list into runs of consecutive numbers, so a gap in the data stays a gap
   function runs(xs, vals, X, Y) {
@@ -576,34 +554,35 @@
           if (lx > lastEnd && lx + label.length * 5.4 < W - mr) { g.appendChild(sv('text', { x: lx, y: mt - 8, 'text-anchor': 'start' }, label)); lastEnd = lx + label.length * 5.4 + 8; }
         }
       });
-      // washes first (back to front, so the lowest series stays on top), then the lines. Curves are monotone: smooth, but never above or below the real samples.
+      // washes first (back to front, so the lowest series stays on top), then the lines. Lines are straight between samples; with a short run every sample also gets a small dot.
       var seriesRuns = cfg.series.map(function (s) { return runs(xs, s.values, X, Y); });
       for (var k = cfg.series.length - 1; k >= 0; k--) {
         if (cfg.area === false) break;
         var areaD = '';
-        seriesRuns[k].forEach(function (r) { if (r.length > 1) areaD += curve(r) + 'L' + r[r.length - 1][0].toFixed(2) + ' ' + Y(0) + 'L' + r[0][0].toFixed(2) + ' ' + Y(0) + 'Z'; });
+        seriesRuns[k].forEach(function (r) { if (r.length > 1) areaD += linePath(r) + 'L' + r[r.length - 1][0].toFixed(2) + ' ' + Y(0) + 'L' + r[0][0].toFixed(2) + ' ' + Y(0) + 'Z'; });
         if (areaD) plot.appendChild(sv('path', { d: areaD, fill: 'url(#' + gid + '-' + k + ')', stroke: 'none' }));
       }
       cfg.series.forEach(function (s, k) {
         var d = '', last = null;
         seriesRuns[k].forEach(function (r) {
-          if (r.length > 1) d += curve(r); else plot.appendChild(sv('circle', { cx: r[0][0], cy: r[0][1], r: 2.5, fill: s.color }));
+          if (r.length > 1) d += linePath(r); else plot.appendChild(sv('circle', { cx: r[0][0], cy: r[0][1], r: 2.5, fill: s.color }));
           last = r[r.length - 1];
         });
         if (d) plot.appendChild(sv('path', { d: d, fill: 'none', stroke: s.color, 'stroke-width': 1.75, 'stroke-linejoin': 'round', 'stroke-linecap': 'round' }));
+        if (vis.length <= 40) seriesRuns[k].forEach(function (r) { r.forEach(function (pt) { plot.appendChild(sv('circle', { cx: pt[0], cy: pt[1], r: 2.3, fill: s.color, stroke: 'var(--surface)', 'stroke-width': 1.1 })); }); });
         if (last && last[0] <= ml + iw + 0.5) {
           plot.appendChild(sv('circle', { cx: last[0], cy: last[1], r: 6.5, fill: s.color, opacity: 0.16 }));
           plot.appendChild(sv('circle', { cx: last[0], cy: last[1], r: 3.2, fill: s.color, stroke: 'var(--surface)', 'stroke-width': 1.6 }));
         }
       });
       g.appendChild(plot);
-      // SLA limits: dashed line in the colour of the series it limits, a small label pill at the right end (labels that would overlap are skipped)
+      // SLA limits: dashed line in the colour of the series it limits, a small label pill at the left end, where latency is usually lowest (labels that would overlap are skipped)
       var lastY = -99;
       refs.slice().sort(function (a, b) { return b.value - a.value; }).forEach(function (r) {
         var ry = Y(r.value);
         g.appendChild(sv('line', { x1: ml, x2: W - mr, y1: ry, y2: ry, stroke: r.color, 'stroke-width': 1.25, 'stroke-dasharray': '5 4', opacity: 0.85 }));
         if (Math.abs(ry - lastY) >= 19) {
-          var pw = r.label.length * 5.5 + 22, px = W - mr - pw - 4;
+          var pw = r.label.length * 5.5 + 22, px = ml + 8;
           g.appendChild(sv('rect', { class: 'ref-pill', x: px, y: ry - 18, width: pw, height: 16, rx: 8, stroke: r.color, 'stroke-opacity': 0.55, 'stroke-width': 1 }));
           g.appendChild(sv('circle', { cx: px + 9, cy: ry - 10, r: 2.3, fill: r.color }));
           g.appendChild(sv('text', { class: 'ref', x: px + 16, y: ry - 6.5, 'text-anchor': 'start' }, r.label));
@@ -695,7 +674,7 @@
     if (max === min) { max += 1; min -= 1; }
     var n = values.length - 1, gid = 'sp' + (++uid);
     var X = function (i) { return i / n * w; }, Y = function (v) { return hgt - 5 - (v - min) / (max - min) * (hgt - 12); };
-    var xy = pts.map(function (p) { return [X(p[0]), Y(p[1])]; }), d = curve(xy);
+    var xy = pts.map(function (p) { return [X(p[0]), Y(p[1])]; }), d = linePath(xy);
     var lg = sv('linearGradient', { id: gid, x1: '0', y1: '0', x2: '0', y2: '1' }, sv('stop', { offset: '0', style: 'stop-color:' + color + ';stop-opacity:.30' }), sv('stop', { offset: '1', style: 'stop-color:' + color + ';stop-opacity:0' }));
     return sv('svg', { class: 'spark', viewBox: '0 0 ' + w + ' ' + hgt, preserveAspectRatio: 'none', 'aria-hidden': 'true' }, sv('defs', null, lg),
       sv('path', { d: d + 'L' + xy[xy.length - 1][0].toFixed(1) + ' ' + hgt + 'L' + xy[0][0].toFixed(1) + ' ' + hgt + 'Z', fill: 'url(#' + gid + ')', stroke: 'none' }),
@@ -710,7 +689,7 @@
   var pending = [];
   // one chart card: title, plot, live legend. In the Tables view the same numbers appear as a table.
   function chartCard(o) {
-    var card = h('section', { class: 'card' }, h('header', null, h('div', null, h('h2', null, o.title), o.sub ? h('div', { class: 'sub' }, o.sub) : null)));
+    var card = h('section', { class: 'card' + (o.wide ? ' wide' : '') }, h('header', null, h('div', null, h('h2', null, o.title), o.sub ? h('div', { class: 'sub' }, o.sub) : null)));
     if (state.view === 'tables') {
       card.appendChild(dataTable(['Time'].concat(o.series.map(function (s) { return s.label; })), o.x.map(function (t, i) {
         return [fmtDur(t)].concat(o.series.map(function (s) { return isNum(s.values[i]) ? o.fmt(s.values[i]) : '–'; }));
@@ -725,7 +704,7 @@
     return card;
   }
   function emptyCard(title, sub, level, text) {
-    return h('section', { class: 'card' }, h('header', null, h('div', null, h('h2', null, title), sub ? h('div', { class: 'sub' }, sub) : null)), h('div', { class: 'empty ' + level }, icon(level), h('span', null, text)));
+    return h('section', { class: 'card wide okrow ' + level }, icon(level), h('div', null, h('h2', null, title), h('div', { class: 'sub' }, text + (sub ? ' · ' + sub : ''))));
   }
 
 
@@ -831,11 +810,14 @@
     var cut = function (s, n) { return s.length > n ? s.slice(0, n - 1) + '…' : s; };
     var latNote = (ls.hasOk || info.latKind === 'ok' ? 'Successful requests' : info.latKind === 'mixed' ? 'Includes error responses' : 'Error responses only: nothing succeeded') + ' · ' + win + ' windows' + (refs.length ? ' · dashed = SLA limits' : '');
 
-    if (L.avg.some(isNum)) cards.push(chartCard({ title: 'Response time', sub: latNote, x: x, fmt: fmtMs, tick: tickMs, refs: refs,
+    if (L.avg.some(isNum)) cards.push(chartCard({ title: 'Response time', sub: latNote, x: x, fmt: fmtMs, tick: tickMs, refs: refs, wide: true,
       series: [{ label: 'Average', color: 'var(--s1)', values: L.avg, summary: A.avg != null ? fmtMs(A.avg) : null }, { label: 'p95', color: 'var(--s2)', values: L.p95, summary: A.p95 != null ? fmtMs(A.p95) : null },
         { label: 'p99', color: 'var(--s3)', values: L.p99, summary: A.p99 != null ? fmtMs(A.p99) : null }] }));
     cards.push(chartCard({ title: 'Throughput', sub: 'Requests per second · ' + win + ' windows', x: x, fmt: fmtRps, tick: tickRps,
       series: [{ label: 'Requests/s', color: 'var(--s1)', values: sr.rps, summary: isNum(info.rps) ? fmtRps(info.rps) : null }] }));
+
+    cards.push(chartCard({ title: 'Virtual users', sub: 'Simulated users active, from the load profile', x: x, fmt: fmtInt, tick: fmtInt, stageLabels: true,
+      series: [{ label: 'Virtual users', color: 'var(--ink2)', values: S.vus, summary: isNum(run.vusMax) ? 'peak ' + fmtInt(run.vusMax) : null }] }));
 
     // per-endpoint comparison (up to three endpoints, so every line keeps one of the three validated colours)
     if (state.scope === 'all' && EPS.length >= 2 && EPS.length <= 3 && S.endpoints) {
@@ -851,12 +833,10 @@
         series: epSeries(function (d) { return d.rps; }, function (e) { return fmtRps(e.requestsPerSec); }) }));
     }
 
-    cards.push(chartCard({ title: 'Virtual users', sub: 'Simulated users active, from the load profile', x: x, fmt: fmtInt, tick: fmtInt, stageLabels: true,
-      series: [{ label: 'Virtual users', color: 'var(--ink2)', values: S.vus, summary: isNum(run.vusMax) ? 'peak ' + fmtInt(run.vusMax) : null }] }));
     if (sr.errorPct.some(function (v) { return isNum(v) && v > 0; }))
       cards.push(chartCard({ title: 'Error rate', sub: 'Share of requests without the expected status · ' + win + ' windows', x: x, fmt: function (v) { return fmtNum(v, 1) + '%'; }, tick: function (v) { return fmtNum(v, 0) + '%'; },
-        series: [{ label: 'Error rate', color: 'var(--crit)', values: sr.errorPct, summary: isNum(info.failed) && info.requests ? fmtPct(info.failed / info.requests) : null }] }));
-    else cards.push(emptyCard('Error rate', 'Share of requests without the expected status', 'good', 'No errors in any ' + win + ' window'));
+        wide: true, series: [{ label: 'Error rate', color: 'var(--crit)', values: sr.errorPct, summary: isNum(info.failed) && info.requests ? fmtPct(info.failed / info.requests) : null }] }));
+    else cards.push(emptyCard('Error rate', 'every request returned the expected status', 'good', 'No errors in any ' + win + ' window'));
 
     zoomCtl = h('span', { class: 'zoomctl' }); renderZoomBar();
     return [h('div', { class: 'sechead' }, h('h2', null, 'Trends over time'), state.view === 'charts' ? zoomCtl : null), h('div', { class: 'grid2' }, cards)];
@@ -944,22 +924,22 @@
       EPS.map(function (e) { return h('option', { value: String(e.index) }, epName(e) + (e.status === 'OK' ? '' : e.status === 'NO_SUCCESS' ? '  ✕ failing' : e.status === 'PARTIAL' ? '  ! errors' : '')); }));
     segCharts = h('button', { onclick: function () { state.view = 'charts'; sync(); renderMain(); } }, 'Charts');
     segTables = h('button', { onclick: function () { state.view = 'tables'; sync(); renderMain(); } }, 'Tables');
-    // theme: Auto follows the operating system; Light / Dark pin it (nothing is stored, a reload returns to Auto)
+    // theme: Light is the default; Dark is one click away (nothing is stored, a reload returns to Light)
     var themeBtns = {};
     function setTheme(mode) {
       var root = document.documentElement;
-      if (mode === 'auto') root.removeAttribute('data-theme'); else root.setAttribute('data-theme', mode);
+      root.setAttribute('data-theme', mode);
       Object.keys(themeBtns).forEach(function (k) { themeBtns[k].setAttribute('aria-pressed', String(k === mode)); });
     }
-    ['auto', 'light', 'dark'].forEach(function (m) { themeBtns[m] = h('button', { 'aria-pressed': String(m === 'auto'), onclick: function () { setTheme(m); } }, m === 'auto' ? 'Auto' : m === 'light' ? 'Light' : 'Dark'); });
+    ['light', 'dark'].forEach(function (m) { themeBtns[m] = h('button', { 'aria-pressed': String(m === 'light'), onclick: function () { setTheme(m); } }, m === 'light' ? 'Light' : 'Dark'); });
     // print is always light, whatever theme is on screen
     var printTheme = null;
     window.addEventListener('beforeprint', function () { var r = document.documentElement; printTheme = r.getAttribute('data-theme'); r.setAttribute('data-theme', 'light'); });
-    window.addEventListener('afterprint', function () { var r = document.documentElement; if (printTheme) r.setAttribute('data-theme', printTheme); else r.removeAttribute('data-theme'); });
+    window.addEventListener('afterprint', function () { document.documentElement.setAttribute('data-theme', printTheme || 'light'); });
     var printIcon = sv('svg', { viewBox: '0 0 24 24', 'aria-hidden': 'true' }, sv('path', { d: 'M6 9V3h12v6' }), sv('path', { d: 'M6 18H4a1 1 0 0 1-1-1v-6a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v6a1 1 0 0 1-1 1h-2' }), sv('path', { d: 'M7 14h10v7H7z' }));
     var toolbar = h('div', { class: 'toolbar', role: 'group', 'aria-label': 'Report filters' },
       h('label', { class: 'field' }, 'Endpoint', sel), h('div', { class: 'field' }, 'View', h('span', { class: 'seg' }, segCharts, segTables)), h('span', { class: 'grow' }),
-      h('div', { class: 'field' }, 'Theme', h('span', { class: 'seg', role: 'group', 'aria-label': 'Theme' }, themeBtns.auto, themeBtns.light, themeBtns.dark)),
+      h('div', { class: 'field' }, 'Theme', h('span', { class: 'seg', role: 'group', 'aria-label': 'Theme' }, themeBtns.light, themeBtns.dark)),
       h('button', { class: 'btn', onclick: function () { window.print(); } }, printIcon, 'Print / PDF'));
     var page = h('div', { class: 'page' }, toolbar, main,
       h('footer', null,
