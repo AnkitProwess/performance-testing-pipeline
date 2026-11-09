@@ -14,8 +14,8 @@ parameters:
     default: "iankit7667@gmail.com,ankit.kumar@prowesssoft.com"
   - name: reportCc
     type: string
-    displayName: "Email Cc (optional, comma separated)"
-    default: ""
+    displayName: "Email Cc (optional, comma separated; 'none' = no Cc)"
+    default: "none" # an empty default makes Azure DevOps show the field as required, so 'none' means no Cc
   - name: apiName
     type: string
     displayName: "API Name (folder name in the API repo, case-sensitive)"

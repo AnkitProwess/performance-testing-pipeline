@@ -4,7 +4,7 @@ parameters:
     default: 'iankit7667@gmail.com,ankit.kumar@prowesssoft.com'
   - name: reportCc
     type: string
-    default: '' # optional Cc, comma separated
+    default: 'none' # optional Cc, comma separated; 'none' (or empty) = no Cc
   - name: apiRepoUrl
     type: string
     default: '' # Defaults to empty for imported CI/CD mode

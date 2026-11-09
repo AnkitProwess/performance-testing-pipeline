@@ -48,7 +48,7 @@ Run parameters (same names in both tools):
 | `apiName` | Folder in the API repo, case-sensitive (empty = repo root). **Not** the `apiName` label inside the JSON. |
 | `profileName` | JSON file name inside that folder, e.g. `load-profile3.json` |
 | `reportRecipient` | Who receives the email, comma or semicolon separated (default: `iankit7667@gmail.com` and `ankit.kumar@prowesssoft.com`) |
-| `reportCc` | Optional Cc addresses, comma or semicolon separated. Empty by default (no Cc). An address already in `reportRecipient` is not repeated. |
+| `reportCc` | Optional Cc addresses, comma or semicolon separated. No Cc by default: Jenkins leaves it empty, Azure DevOps uses `none` (an empty default would make Azure show the field as required). An address already in `reportRecipient` is not repeated. |
 | `debug` | `true` adds `k6 --http-debug=full`. It writes request headers, **including credentials and tokens**, to the log. Use only when needed. |
 | Jenkins only: `apiRepoBranch`, `apiRepoCredentialsId` | Branch to clone (default `main`); credentials ID for a private API repo |
 

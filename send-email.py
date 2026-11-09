@@ -123,7 +123,9 @@ if __name__ == '__main__':
     # Deduplicate keeping insertion order
     final_recipients = unique(split_addresses(developer_to) + split_addresses(mandatory_to))
     # Cc: an address that is already in To is not repeated
-    final_cc = unique(split_addresses(args.cc), exclude=final_recipients)
+    # 'none' / '-' mean "no Cc": Azure DevOps shows a parameter with an empty default as required, so the pipeline default is 'none'
+    cc_value = "" if args.cc.strip().lower() in ("none", "-", "n/a") else args.cc
+    final_cc = unique(split_addresses(cc_value), exclude=final_recipients)
 
     to_emails = ", ".join(final_recipients)
     cc_emails = ", ".join(final_cc)
