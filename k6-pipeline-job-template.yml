@@ -124,16 +124,6 @@ jobs:
         condition: succeededOrFailed()
         continueOnError: true
 
-      # 4b. Publish k6's own dashboard export next to it, only to compare the custom report against k6's numbers (not emailed)
-      - task: PublishBuildArtifacts@1
-        inputs:
-          PathtoPublish: '$(Pipeline.Workspace)/s/api-repo/k6-dashboard.html'
-          ArtifactName: 'K6DashboardReport'
-          publishLocation: 'Container'
-        displayName: 'Archive k6 Dashboard HTML (for comparison)'
-        condition: succeededOrFailed()
-        continueOnError: true
-
       # 5. Execute the SMTP email delivery using the Python utility script
       - script: |
           API_NAME="${{ parameters.apiName }}"
