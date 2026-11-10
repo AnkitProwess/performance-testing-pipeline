@@ -432,6 +432,11 @@
     var eps = scope === 'all' ? EPS : [EPS[scope - 1]];
     if (run.stoppedEarly) add('crit', 'The run was stopped early by the engine; the build log shows the reason.');
     eps.forEach(function (e) {
+      if (e.credentialsRejected) {
+        add('crit', epName(e) + ': the credentials were not accepted' + (e.requests ? ' (' + codesText(e).replace(/^Seen: /, '').replace(/\.$/, '') + ')' : ' (authentication could not be set up)') +
+          '. ' + (e.ok ? 'The endpoint was skipped from then on.' : 'It was not load tested: a rejected endpoint is never retried, so the account is not hammered with bad credentials.') + ' The other endpoints were tested normally.');
+        return;
+      }
       if (e.status === 'NO_SUCCESS') add('crit', epName(e) + ' never returned the expected HTTP ' + e.expectedStatus.join(' or ') + '. ' + codesText(e));
       else if (e.status === 'PARTIAL') add('warn', epName(e) + ': ' + fmtPct(e.errorRate) + ' of its requests did not return the expected status. ' + codesText(e));
       else if (e.status === 'NOT_RUN') add('info', epName(e) + ' was not called.');
@@ -726,7 +731,7 @@
       h('div', { class: 'finds' }, list.map(function (o) { return h('div', { class: 'find', style: '--c:var(--' + lv(o.level) + ')' }, icon(o.level), h('span', null, o.text)); })));
   }
   function resultPill(e) {
-    var map = { OK: ['good', 'OK'], PARTIAL: ['warn', 'Partly failing'], NO_SUCCESS: ['crit', 'Failing'], NOT_RUN: ['info', 'Not called'] }, m = map[e.status] || ['info', e.status];
+    var map = { OK: ['good', 'OK'], PARTIAL: ['warn', 'Partly failing'], NO_SUCCESS: ['crit', 'Failing'], NOT_RUN: ['info', 'Not called'] }, m = e.credentialsRejected ? ['crit', 'Credentials rejected'] : map[e.status] || ['info', e.status];
     return h('span', { class: 'pill', style: '--c:var(--' + lv(m[0]) + ')' }, icon(m[0]), m[1]);
   }
   function compareCard() {
@@ -911,7 +916,7 @@
       h('div', { class: 'verdict', style: '--c:var(--' + b.level + ')' }, icon(b.level), h('div', null, h('div', { class: 'big' }, b.title), h('div', { class: 'det' }, b.detail)))));
     sel = h('select', { id: 'ep', 'aria-label': 'Endpoint', onchange: function () { select(this.value === 'all' ? 'all' : Number(this.value)); } },
       h('option', { value: 'all' }, 'All endpoints (' + EPS.length + ')'),
-      EPS.map(function (e) { return h('option', { value: String(e.index) }, epName(e) + (e.status === 'OK' ? '' : e.status === 'NO_SUCCESS' ? '  ✕ failing' : e.status === 'PARTIAL' ? '  ! errors' : '')); }));
+      EPS.map(function (e) { return h('option', { value: String(e.index) }, epName(e) + (e.credentialsRejected ? '  ✕ credentials rejected' : e.status === 'OK' ? '' : e.status === 'NO_SUCCESS' ? '  ✕ failing' : e.status === 'PARTIAL' ? '  ! errors' : '')); }));
     segCharts = h('button', { onclick: function () { state.view = 'charts'; sync(); renderMain(); } }, 'Charts');
     segTables = h('button', { onclick: function () { state.view = 'tables'; sync(); renderMain(); } }, 'Tables');
     // theme: Light is the default; Dark is one click away (nothing is stored, a reload returns to Light)

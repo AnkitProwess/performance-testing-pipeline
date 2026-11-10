@@ -16,7 +16,7 @@
 # never as values on the command line. A name that is not set on the host is simply not passed on.
 # Writes <api-repo-dir>/k6-reason.txt when the engine stated why it stopped (empty otherwise).
 # Exit code = k6's exit code: 0 passed, 99 thresholds crossed, anything else = the test could not run.
-# One remap: 0 / 99 become 108 when an endpoint never returned its expected status (the report is still produced).
+# One remap: 0 / 99 become 108 when an endpoint never returned its expected status or its credentials were rejected (the report is still produced).
 
 API_DIR="${1:?api-repo-dir missing}"
 PROFILE_REL="${2:?profile path missing}"

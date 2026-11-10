@@ -105,6 +105,7 @@ const endpointStats = new Map();
         requests: new Counter(`ep${n}_requests`),
         ok: new Counter(`ep${n}_ok`),
         noResponse: new Counter(`ep${n}_no_response`),
+        skipped: new Counter(`ep${n}_skipped`), // endpoint not (or no longer) called because its credentials were rejected
         badStatus: new Trend(`ep${n}_bad_status`), // only unexpected HTTP statuses; min / max show which codes came back
         statusCodes: statusCodes,
         statusCounters: statusCounters,
@@ -113,6 +114,8 @@ const endpointStats = new Map();
         okDuration: new Trend(`ep${n}_ok_duration`, true),
     });
 });
+const epIndexOf = new Map((config.endpoints || []).map((ep, i) => [ep, i]));
+const skippedEps = new Set(); // endpoint indexes this VU no longer calls (rejected credentials), see checkResponse() and setup()
 const okDurationAll = new Trend('ok_duration', true); // response time of the requests that returned an expected status, all endpoints together
 
 // Reusable Helper: Prepare request configurations
@@ -161,7 +164,10 @@ function executeSingleRequest(ep, authStates) {
 // Reusable Helper: Validate response status
 //
 // Rules (README section 3):
-//  - 401 / 403 that the profile did not expect: the credentials are not accepted, the whole run is meaningless -> stop at once (exit 108).
+//  - 401 / 403 that the profile did not expect: THAT endpoint's credentials are not accepted. setup() sends ONE request to every endpoint first, so a bad
+//    credential costs one request per endpoint (never a flood that could lock the account), and the endpoints that work are still load tested.
+//    A rejected endpoint is skipped from then on. Only when EVERY endpoint is rejected is the run stopped at once (exit 108). Otherwise the run completes and
+//    handleSummary() reports the rejected endpoints, which turns the build red (108) with the report attached.
 //  - No HTTP response at all for the first NO_RESPONSE_LIMIT requests of a VU: the API was never reached -> stop (exit 108).
 //  - Anything else (404, 409, 400, 5xx, ...) means the API answered and the credentials work. The run CONTINUES so the report covers every endpoint;
 //    handleSummary() then flags an endpoint that never succeeded (see below).
@@ -178,7 +184,8 @@ function abortRun(code, text) {
     exec.test.abort(emitReason(code, text));
 }
 
-function checkResponse(res, ep) {
+// Counts one response for its endpoint (metrics only, no decisions). Returns true when the status was one the profile expects.
+function recordResponse(res, ep) {
     const stats = endpointStats.get(ep);
     const ok = stats.expected.includes(res.status);
     check(res, {
@@ -202,11 +209,32 @@ function checkResponse(res, ep) {
             okDurationAll.add(res.timings.duration);
         }
     }
+    return ok;
+}
 
-    // Rejected credentials make the whole run meaningless (every request is turned away), and as a threshold miss it would pass for an SLA miss (exit 99).
-    // A profile that deliberately expects 401/403 is left alone.
-    if (!ok && (res.status === 401 || res.status === 403)) {
-        abortRun('CREDENTIALS_REJECTED', `The API answered HTTP ${res.status} (${res.status === 401 ? 'not authenticated' : 'not permitted'}) for ${stats.label}, so the credentials or token were not accepted. Check that they are correct, not expired, and allowed to call this API.`);
+// A profile that deliberately expects 401/403 for an endpoint is left alone.
+function isRejected(res, ep) {
+    return (res.status === 401 || res.status === 403) && !endpointStats.get(ep).expected.includes(res.status);
+}
+
+function allEndpointLabels() {
+    return (config.endpoints || []).map((ep) => endpointStats.get(ep).label).join(', ');
+}
+
+function checkResponse(res, ep) {
+    const stats = endpointStats.get(ep);
+    recordResponse(res, ep);
+
+    // Rejected credentials for this endpoint: stop calling it (from this VU on) instead of repeating a request that can only be turned away.
+    if (isRejected(res, ep)) {
+        const index = epIndexOf.get(ep);
+        if (!skippedEps.has(index)) {
+            skippedEps.add(index);
+            stats.skipped.add(1);
+        }
+        if (skippedEps.size >= (config.endpoints || []).length) {
+            abortRun('CREDENTIALS_REJECTED', `The API answered HTTP ${res.status} (${res.status === 401 ? 'not authenticated' : 'not permitted'}) and the credentials or token were not accepted for any endpoint (${allEndpointLabels()}). Check that they are correct, not expired, and allowed to call this API.`);
+        }
     }
 
     // Nothing answered at all: wrong host, network or API down. Per VU (each VU has its own copy of this module).
@@ -254,6 +282,7 @@ export function handleSummary(data) {
     const count = (name) => values(name).count || 0;
     const lines = ['', '==== Performance test summary ===='];
     const problems = [];
+    const credProblems = []; // endpoints whose credentials were rejected (they are reported separately from endpoints that answered but never succeeded)
 
     const failed = metrics.http_req_failed && metrics.http_req_failed.values;
     const duration = metrics.http_req_duration && metrics.http_req_duration.values;
@@ -294,6 +323,10 @@ export function handleSummary(data) {
             statusCodes.noResponse = noResponse;
         }
 
+        // Credentials rejected = a 401 / 403 the profile did not expect, or an endpoint skipped because its authentication could not be set up
+        const rejectedCodes = [401, 403].filter((c) => !stats.expected.includes(c) && statusCodes[c] > 0);
+        const credRejected = rejectedCodes.length > 0 || count(`ep${index}_skipped`) > 0;
+
         endpointResults.push({
             index: index,
             label: stats.label,
@@ -308,6 +341,7 @@ export function handleSummary(data) {
             successRate: requests > 0 ? round(okCount / requests, 4) : null,
             errorRate: requests > 0 ? round((requests - okCount) / requests, 4) : null,
             requestsPerSec: round(values(`ep${index}_requests`).rate, 2),
+            credentialsRejected: credRejected,
             statusCodes: statusCodes,
             badStatusRange: hasBad ? { min: bad.min, max: bad.max } : null,
             latencyOk: latencyOk,   // response time of the requests that returned an expected status: use this for SLAs
@@ -324,8 +358,10 @@ export function handleSummary(data) {
         if (latencyOk) {
             detail += `, latency(ok) avg ${ms(latencyOk.avg)} p95 ${ms(latencyOk.p95)} p99 ${ms(latencyOk.p99)} ms`;
         }
-        lines.push(`  ${okCount > 0 || requests === 0 ? 'OK  ' : 'FAIL'} ${stats.label}: ${requests} requests, ${okCount} returned ${expected}${detail}`);
-        if (requests > 0 && okCount === 0) {
+        lines.push(`  ${okCount > 0 || (requests === 0 && !credRejected) ? 'OK  ' : 'FAIL'} ${stats.label}: ${requests} requests, ${okCount} returned ${expected}${detail}`);
+        if (credRejected) {
+            credProblems.push(`${stats.label} (${rejectedCodes.length ? `HTTP ${rejectedCodes.join('/')}` : 'authentication could not be set up'}${okCount > 0 ? ', after it had worked' : ''})`);
+        } else if (requests > 0 && okCount === 0) {
             problems.push(noResponse === requests
                 ? `${stats.label} got no HTTP response in any of ${requests} requests`
                 : `${stats.label} never returned the expected HTTP ${expected} in ${requests} requests (got ${badText || 'no HTTP response'})`);
@@ -346,8 +382,15 @@ export function handleSummary(data) {
     let verdict = '';
     if (count('perf_stopped_early') > 0) {
         lines.push('', 'The run was stopped early by the engine; the reason is the PERF_REASON line in the log above.');
-    } else if (problems.length > 0) {
-        verdict = `PERF_REASON|ENDPOINT_NO_SUCCESS|${cleanReason(`The test ran and the report is attached, but not every endpoint worked: ${problems.join('; ')}. The API answered, so the credentials were accepted. Check the URL, method, payload and expectedStatus of the endpoint(s) in the profile.`)}`;
+    } else if (credProblems.length > 0 || problems.length > 0) {
+        const parts = [];
+        if (credProblems.length > 0) {
+            parts.push(`the credentials were not accepted for ${credProblems.join('; ')}, so ${credProblems.length === 1 ? 'that endpoint was' : 'those endpoints were'} skipped from then on (a rejected endpoint is never retried, so the account is not hammered with bad credentials). Check that the credentials are correct, not expired, and allowed to call ${credProblems.length === 1 ? 'it' : 'them'}`);
+        }
+        if (problems.length > 0) {
+            parts.push(`${credProblems.length > 0 ? 'also, ' : ''}not every endpoint worked: ${problems.join('; ')}. The API answered, so the credentials were accepted for ${credProblems.length > 0 ? 'these' : 'them'}. Check the URL, method, payload and expectedStatus of the endpoint(s) in the profile`);
+        }
+        verdict = `PERF_REASON|${credProblems.length > 0 ? 'CREDENTIALS_REJECTED' : 'ENDPOINT_NO_SUCCESS'}|${cleanReason(`The test ran and the report is attached, but ${parts.join('. ')}.`)}`;
         lines.push('', `VERDICT: ${verdict.split('|')[2]}`);
     }
     lines.push('');
@@ -432,20 +475,61 @@ if (currentBatch.length > 0) {
     executionFlow.push({ type: 'batch', items: currentBatch });
 }
 
-// Runs once before the load starts: validate every credential set, then let its auth module do its one-time work (e.g. fetch a token)
+// Runs once before the load starts.
+//  1. every credential set is validated (a missing / unresolved value is a profile or pipeline mistake: the whole run fails fast) and set up (e.g. a token is fetched);
+//     a set whose setup FAILS (the identity provider refuses the secret) only blocks the endpoints that use it,
+//  2. ONE request is sent to every endpoint. A 401 / 403 marks that endpoint as rejected: it is never called again, the others are load tested.
+// If nothing is left to test, the run stops here (exit 108 for rejected credentials; the token failure keeps its own error and reason).
 export function setup() {
-    const authStates = authSets.map((set) => {
+    const endpoints = config.endpoints || [];
+    const authFailures = new Map();
+    const authStates = authSets.map((set, i) => {
         set.handler.validate(set.authParameters);
-        return set.handler.setup(set.authParameters);
+        try {
+            return set.handler.setup(set.authParameters);
+        } catch (e) {
+            authFailures.set(i, e);
+            return null;
+        }
     });
-    return { authStates: authStates };
+
+    const blocked = [];
+    endpoints.forEach((ep, i) => {
+        const auth = authByEndpoint.get(ep);
+        if (auth && authFailures.has(auth.index)) {
+            endpointStats.get(ep).skipped.add(1);
+            blocked.push(i);
+            return;
+        }
+        const res = executeSingleRequest(ep, authStates);
+        recordResponse(res, ep);
+        if (isRejected(res, ep)) {
+            endpointStats.get(ep).skipped.add(1);
+            blocked.push(i);
+        }
+    });
+
+    if (endpoints.length > 0 && blocked.length === endpoints.length) {
+        if (authFailures.size > 0) {
+            throw authFailures.values().next().value; // the module already stated the reason (TOKEN_REQUEST_FAILED ...)
+        }
+        abortRun('CREDENTIALS_REJECTED', `The API rejected the credentials (HTTP 401 / 403) for every endpoint (${allEndpointLabels()}), so no load was generated. Check that they are correct, not expired, and allowed to call this API.`);
+    }
+    return { authStates: authStates, blocked: blocked };
 }
 
 export default function (data) {
     const authStates = data ? data.authStates : null;
+    if (data && data.blocked) {
+        data.blocked.forEach((i) => skippedEps.add(i));
+    }
+    const runnable = (ep) => !skippedEps.has(epIndexOf.get(ep));
     for (const step of executionFlow) {
         if (step.type === 'single') {
             const ep = step.item;
+            if (!runnable(ep)) {
+                continue; // credentials rejected for this endpoint: do not call it again
+            }
             const res = executeSingleRequest(ep, authStates);
             checkResponse(res, ep);
 
@@ -455,19 +539,23 @@ export default function (data) {
                 sleep(sleepDuration);
             }
         } else if (step.type === 'batch') {
-            const batchSpecs = step.items.map((ep) => prepareRequestSpec(ep, authStates));
-            
+            const items = step.items.filter(runnable);
+            if (items.length === 0) {
+                continue;
+            }
+            const batchSpecs = items.map((ep) => prepareRequestSpec(ep, authStates));
+
             // Execute batch parallelly
             const responses = http.batch(batchSpecs);
 
             // Validate all responses in the batch
             for (let i = 0; i < responses.length; i++) {
-                checkResponse(responses[i], step.items[i]);
+                checkResponse(responses[i], items[i]);
             }
 
             // Pacing for the batch (uses the maximum sleepDuration defined among the batch items)
             let maxSleep = 0;
-            for (const ep of step.items) {
+            for (const ep of items) {
                 const sd = ep.sleepDuration !== undefined ? ep.sleepDuration : 1;
                 if (sd > maxSleep) {
                     maxSleep = sd;
