@@ -164,7 +164,7 @@ function executeSingleRequest(ep, authStates) {
 // Reusable Helper: Validate response status
 //
 // Rules (README section 3):
-//  - 401 / 403 that the profile did not expect: THAT endpoint's credentials are not accepted. setup() sends ONE request to every endpoint first, so a bad
+//  - 401 / 403 that the profile did not expect: THAT endpoint's credentials are not accepted. setup() probes first (see PROBE_MODES), so a bad
 //    credential costs one request per endpoint (never a flood that could lock the account), and the endpoints that work are still load tested.
 //    A rejected endpoint is skipped from then on. Only when EVERY endpoint is rejected is the run stopped at once (exit 108). Otherwise the run completes and
 //    handleSummary() reports the rejected endpoints, which turns the build red (108) with the report attached.
@@ -475,13 +475,37 @@ if (currentBatch.length > 0) {
     executionFlow.push({ type: 'batch', items: currentBatch });
 }
 
+// Probe mode (profile field "probe"): which endpoints get ONE request in setup() to find out whether the credentials are accepted.
+//   "auto" (default)  per credential set: the read-only endpoints are probed; the write endpoints are probed only when a read was answered 401, because a request
+//                     that is turned away has no side effect. A set without any read-only endpoint gets ONE probe, on its first endpoint.
+//   "all"             every endpoint is probed (one request each, writes included)
+//   "off"             no probe at all: each virtual user finds out for itself, so bad credentials are sent once per VU (can lock an account)
+const PROBE_MODES = ['auto', 'all', 'off'];
+const READ_ONLY_METHODS = ['GET', 'HEAD', 'OPTIONS'];
+
+// Safe to call an extra time: GET / HEAD / OPTIONS, or an endpoint the profile flags "readOnly": true (e.g. a GraphQL query sent as POST).
+// "readOnly": false on a GET marks a read that must not be probed.
+function isReadOnly(ep) {
+    if (ep.readOnly !== undefined) {
+        return ep.readOnly === true;
+    }
+    return READ_ONLY_METHODS.includes((ep.method || 'GET').toUpperCase());
+}
+
 // Runs once before the load starts.
 //  1. every credential set is validated (a missing / unresolved value is a profile or pipeline mistake: the whole run fails fast) and set up (e.g. a token is fetched);
 //     a set whose setup FAILS (the identity provider refuses the secret) only blocks the endpoints that use it,
-//  2. ONE request is sent to every endpoint. A 401 / 403 marks that endpoint as rejected: it is never called again, the others are load tested.
+//  2. the credential probe (see PROBE_MODES): a 401 / 403 marks that endpoint as rejected, it is never called again and the others are load tested.
+//     An endpoint that was not probed is simply called by the load; a rejection found there is handled by checkResponse().
 // If nothing is left to test, the run stops here (exit 108 for rejected credentials; the token failure keeps its own error and reason).
 export function setup() {
     const endpoints = config.endpoints || [];
+    const probeMode = config.probe !== undefined ? config.probe : 'auto';
+    if (!PROBE_MODES.includes(probeMode)) {
+        emitReason('PROFILE_INVALID', `The profile field "probe" must be one of ${PROBE_MODES.join(', ')} (got "${String(probeMode)}").`);
+        throw new Error(`Invalid probe mode "${probeMode}".`);
+    }
+
     const authFailures = new Map();
     const authStates = authSets.map((set, i) => {
         set.handler.validate(set.authParameters);
@@ -494,20 +518,54 @@ export function setup() {
     });
 
     const blocked = [];
-    endpoints.forEach((ep, i) => {
-        const auth = authByEndpoint.get(ep);
-        if (auth && authFailures.has(auth.index)) {
-            endpointStats.get(ep).skipped.add(1);
-            blocked.push(i);
-            return;
-        }
+    let probeRequests = 0;
+
+    // Sends the one probe request of endpoint i; returns the response.
+    function probe(i) {
+        const ep = endpoints[i];
         const res = executeSingleRequest(ep, authStates);
+        probeRequests++;
         recordResponse(res, ep);
         if (isRejected(res, ep)) {
             endpointStats.get(ep).skipped.add(1);
             blocked.push(i);
         }
+        return res;
+    }
+
+    // Endpoints grouped by credential set (key -1 = no engine-managed auth), in order of first appearance
+    const groups = new Map();
+    endpoints.forEach((ep, i) => {
+        const auth = authByEndpoint.get(ep);
+        if (auth && authFailures.has(auth.index)) {
+            endpointStats.get(ep).skipped.add(1); // the token could not be fetched: nothing to send
+            blocked.push(i);
+            return;
+        }
+        const key = auth ? auth.index : -1;
+        if (!groups.has(key)) {
+            groups.set(key, []);
+        }
+        groups.get(key).push(i);
     });
+
+    if (probeMode === 'all') {
+        groups.forEach((members) => members.forEach((i) => probe(i)));
+    } else if (probeMode === 'auto') {
+        groups.forEach((members) => {
+            const reads = members.filter((i) => isReadOnly(endpoints[i]));
+            const first = reads.length > 0 ? reads : [members[0]]; // no read-only endpoint: ONE probe, the smallest side effect that still protects the account
+            const authRejected = first.map(probe).some((res, n) => res.status === 401 && isRejected(res, endpoints[first[n]]));
+            if (authRejected) {
+                // The credentials are bad, so the remaining requests are turned away before they can change anything: probing them costs nothing
+                // and gives each endpoint its own result in the report.
+                members.filter((i) => !first.includes(i)).forEach((i) => probe(i));
+            }
+        });
+    }
+    if (endpoints.length > 0) {
+        console.log(`Credential probe (${probeMode}): ${probeRequests} request(s) for ${endpoints.length} endpoint(s).`);
+    }
 
     if (endpoints.length > 0 && blocked.length === endpoints.length) {
         if (authFailures.size > 0) {

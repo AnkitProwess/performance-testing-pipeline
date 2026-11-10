@@ -1,7 +1,7 @@
 __pycache__/
 report.html
 results.json
-sample-api 4/
+sample-api/
 progress.md
 report/__pycache__/
 k6-dashboard.html
