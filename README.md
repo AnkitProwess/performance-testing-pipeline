@@ -138,14 +138,14 @@ The engine reads **environment variable names**. The names of the Azure variable
 
 | Environment variable | Used by `authType` | Azure DevOps (variable group -> variable) | Jenkins (credential ID, type) |
 |---|---|---|---|
-| `CLIENT_ID`, `CLIENT_SECRET` | `CLIENT_ID_ENFORCEMENT` | `dev-test` -> `client_id`, `client_secret` | `perf-client-id` (username with password) |
-| `OAUTH_CLIENT_ID`, `OAUTH_CLIENT_SECRET` | `OAUTH2_CLIENT_CREDENTIALS` | `Oauth` -> `OAUTH_CLIENT_ID`, `OAUTH_CLIENT_SECRET` | `perf-oauth-client` (username with password) |
-| `OAUTH_TOKEN_URL` | `OAUTH2_CLIENT_CREDENTIALS` | `Oauth` -> `OAUTH_TOKEN_URL` | `perf-oauth-token-url` (secret text) |
-| `OAUTH_SCOPE` | `OAUTH2_CLIENT_CREDENTIALS` | `Oauth` -> `OAUTH_SCOPE` | `perf-oauth-scope` (secret text) |
-| `BASIC_USERNAME`, `BASIC_PASSWORD` | `BASIC` | `BasicAuth` -> `BASIC_USERNAME`, `BASIC_PASSWORD` | `perf-basic-auth` (username with password) |
-| `SMTP_USER`, `SMTP_PASSWORD` | email | `email-testing-vg` -> `SMTP_USER`, `SMTP_PASS` | `perf-smtp` (username with password) |
-| `SMTP_HOST`, `SMTP_PORT`, `SMTP_TLS`, `SMTP_FROM` | email | `email-testing-vg` | `environment` block of the `Jenkinsfile` (`SMTP_FROM` defaults to the SMTP user) |
-| `MANDATORY_RECIPIENTS` (optional) | email | `email-testing-vg` | global environment variable |
+| `CLIENT_ID`, `CLIENT_SECRET` | `CLIENT_ID_ENFORCEMENT` | `perf-client-id` -> `client_id`, `client_secret` | `perf-client-id` (username with password) |
+| `OAUTH_CLIENT_ID`, `OAUTH_CLIENT_SECRET` | `OAUTH2_CLIENT_CREDENTIALS` | `perf-oauth` -> `OAUTH_CLIENT_ID`, `OAUTH_CLIENT_SECRET` | `perf-oauth-client` (username with password) |
+| `OAUTH_TOKEN_URL` | `OAUTH2_CLIENT_CREDENTIALS` | `perf-oauth` -> `OAUTH_TOKEN_URL` | `perf-oauth-token-url` (secret text) |
+| `OAUTH_SCOPE` | `OAUTH2_CLIENT_CREDENTIALS` | `perf-oauth` -> `OAUTH_SCOPE` | `perf-oauth-scope` (secret text) |
+| `BASIC_USERNAME`, `BASIC_PASSWORD` | `BASIC` | `perf-basic-auth` -> `BASIC_USERNAME`, `BASIC_PASSWORD` | `perf-basic-auth` (username with password) |
+| `SMTP_USER`, `SMTP_PASSWORD` | email | `perf-smtp` -> `SMTP_USER`, `SMTP_PASS` | `perf-smtp` (username with password) |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_TLS`, `SMTP_FROM` | email | `perf-smtp` | `environment` block of the `Jenkinsfile` (`SMTP_FROM` defaults to the SMTP user) |
+| `MANDATORY_RECIPIENTS` (optional) | email | `perf-smtp` | global environment variable |
 
 Two storage differences, both handled in each CI tool's own mapping (no engine change): Azure stores the OAuth client ID and secret as two variables, Jenkins as one username/password credential; Azure's SMTP password variable is `SMTP_PASS`, which the template maps to `SMTP_PASSWORD`.
 
@@ -154,15 +154,15 @@ If a profile needs a value that was never supplied, or a variable that still hol
 ## 5. Azure DevOps setup
 
 1. **Variable groups** (Pipelines -> Library), each authorised for the pipeline. Create only what your profiles use, but note that the template references all four groups, so **a missing group fails every run**:
-   - `dev-test`: `client_id`, `client_secret` (secret); optional `GITHUB_PAT` (secret) for a private API repo.
-   - `Oauth`: `OAUTH_TOKEN_URL`, `OAUTH_CLIENT_ID`, `OAUTH_CLIENT_SECRET` (secret), `OAUTH_SCOPE`.
-   - `BasicAuth`: `BASIC_USERNAME`, `BASIC_PASSWORD` (secret).
-   - `email-testing-vg`: `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS` (secret), `SMTP_FROM`, `SMTP_TLS`; optional `MANDATORY_RECIPIENTS`.
+   - `perf-client-id`: `client_id`, `client_secret` (secret); optional `GITHUB_PAT` (secret) for a private API repo.
+   - `perf-oauth`: `OAUTH_TOKEN_URL`, `OAUTH_CLIENT_ID`, `OAUTH_CLIENT_SECRET` (secret), `OAUTH_SCOPE`.
+   - `perf-basic-auth`: `BASIC_USERNAME`, `BASIC_PASSWORD` (secret).
+   - `perf-smtp`: `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS` (secret), `SMTP_FROM`, `SMTP_TLS`; optional `MANDATORY_RECIPIENTS`.
      Gmail: `smtp.gmail.com`, `465`, `SMTP_TLS=ssl`, an app password.
 2. **Create the pipeline:** New pipeline -> GitHub -> this repo -> *Existing Azure Pipelines YAML file* -> `/azure-pipelines.yml`. A pushed YAML change needs no pipeline update; every run reads the YAML from the branch.
 3. **Agent:** Microsoft-hosted `ubuntu-latest` (has Docker, git, Python). A new organisation has 0 hosted parallel jobs by default: request the free grant (https://aka.ms/azpipelines-parallelism-request) or use a self-hosted Ubuntu agent with Docker, Python 3 and git and change the `pool` in `k6-pipeline-job-template.yml`.
 4. **Run:** Run pipeline -> set the parameters from section 2. Results arrive by email and as the build artifact `StressTestReport`.
-   **Private repos:** the tooling repo needs no token (Azure fetches it through its own GitHub connection, the Azure Pipelines GitHub app). A private **API repo** needs a read-only GitHub token (fine-grained: only the repos it must read, permission *Contents: Read-only*, with an expiry) stored as the secret variable `GITHUB_PAT` in `dev-test`; without it the clone is anonymous.
+   **Private repos:** the tooling repo needs no token (Azure fetches it through its own GitHub connection, the Azure Pipelines GitHub app). A private **API repo** needs a read-only GitHub token (fine-grained: only the repos it must read, permission *Contents: Read-only*, with an expiry) stored as the secret variable `GITHUB_PAT` in `perf-client-id`; without it the clone is anonymous.
 5. Defaults for `apiName` / `profileName` are set in `azure-pipelines.yml`.
 
 ## 6. Jenkins setup

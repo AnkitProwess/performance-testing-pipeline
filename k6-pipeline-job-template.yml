@@ -26,10 +26,10 @@ jobs:
     
     # 1. Reference the SMTP secret variable group
     variables:
-      - group: email-testing-vg
-      - group: Oauth # OAUTH_TOKEN_URL / OAUTH_CLIENT_ID / OAUTH_CLIENT_SECRET / OAUTH_SCOPE for authType OAUTH2_CLIENT_CREDENTIALS profiles
-      - group: BasicAuth # BASIC_USERNAME / BASIC_PASSWORD for authType BASIC profiles
-      - group: dev-test # client_id / client_secret for {{CLIENT_ID}} / {{CLIENT_SECRET}} in the profile; optional GITHUB_PAT for private API repos
+      - group: perf-smtp
+      - group: perf-oauth # OAUTH_TOKEN_URL / OAUTH_CLIENT_ID / OAUTH_CLIENT_SECRET / OAUTH_SCOPE for authType OAUTH2_CLIENT_CREDENTIALS profiles
+      - group: perf-basic-auth # BASIC_USERNAME / BASIC_PASSWORD for authType BASIC profiles
+      - group: perf-client-id # client_id / client_secret for {{CLIENT_ID}} / {{CLIENT_SECRET}} in the profile; optional GITHUB_PAT for private API repos
 
     steps:
       # SCENARIO A: Dynamic Manual Run (triggered from master pipeline with an apiRepoUrl parameter)
