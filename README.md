@@ -33,9 +33,10 @@ Run with parameters
   -> checkout this tooling repo
   -> clone the API repo (apiRepoUrl)
   -> copy k6-engine-script.js + auth/ next to the profile
-  -> ci/run-k6.sh : grafana/k6 in Docker -> k6-dashboard.html + results.json (internal inputs, not published), exit code
+  -> ci/run-k6.sh : grafana/k6 in Docker -> k6-dashboard.html + results.json (inputs of the report; k6-dashboard.html is also archived for comparison), exit code
   -> report/build_report.py : results.json + the time series in k6-dashboard.html -> report.html, see "Custom report" below
-  -> archive report.html (Azure: artifact "StressTestReport", Jenkins: build artifact). It is the only output, and the only email attachment
+  -> archive report.html (Azure: artifact "StressTestReport", Jenkins: build artifact). It is the only email attachment
+  -> also archive k6's own dashboard, k6-dashboard.html (Azure: artifact "K6DashboardReport", Jenkins: build artifact), only so you can compare the custom report against k6's numbers. Not emailed
   -> ci/status.sh + send-email.py : email the report
   -> final check: decide the build result from the k6 exit code
 ```
@@ -110,7 +111,7 @@ Notes: status code counts are exact for the codes 200, 201, 202, 204, 301, 302, 
 
 ### The report (report.html)
 
-`report/build_report.py` turns `results.json` (numbers) and the dashboard export `k6-dashboard.html` (the time series, one point per 5 s window) into **one self-contained HTML file**, `report.html`: everything is inline (CSS, JS, SVG charts), so it opens offline and as an email attachment. The one optional external request is the Inter web font (three `<link>` lines at the top of `report/report-template.html`); offline, or with those lines deleted, the report uses the system UI font. It is the only file that is published and the only one attached to the email; `k6-dashboard.html` and `results.json` stay in the workspace as inputs. Python standard library only. It never fails the build: on a problem it prints a warning and the pipeline carries on.
+`report/build_report.py` turns `results.json` (numbers) and the dashboard export `k6-dashboard.html` (the time series, one point per 5 s window) into **one self-contained HTML file**, `report.html`: everything is inline (CSS, JS, SVG charts), so it opens offline and as an email attachment. The one optional external request is the Inter web font (three `<link>` lines at the top of `report/report-template.html`); offline, or with those lines deleted, the report uses the system UI font. It is the only file attached to the email. `k6-dashboard.html` (k6's own report) is archived next to it as a separate artifact so the two can be compared; `results.json` stays in the workspace as an input. When comparing, note that k6's dashboard counts every response in its latency figures, while this report prefers the latency of successful requests (it falls back to all responses when an endpoint had no successful one). Expect small differences for that reason, and for the 5 s aggregation windows. Python standard library only. It never fails the build: on a problem it prints a warning and the pipeline carries on.
 
 What the page shows, and why only this:
 
@@ -161,7 +162,7 @@ If a profile needs a value that was never supplied, or a variable that still hol
      Gmail: `smtp.gmail.com`, `465`, `SMTP_TLS=ssl`, an app password.
 2. **Create the pipeline:** New pipeline -> GitHub -> this repo -> *Existing Azure Pipelines YAML file* -> `/azure-pipelines.yml`. A pushed YAML change needs no pipeline update; every run reads the YAML from the branch.
 3. **Agent:** Microsoft-hosted `ubuntu-latest` (has Docker, git, Python). A new organisation has 0 hosted parallel jobs by default: request the free grant (https://aka.ms/azpipelines-parallelism-request) or use a self-hosted Ubuntu agent with Docker, Python 3 and git and change the `pool` in `k6-pipeline-job-template.yml`.
-4. **Run:** Run pipeline -> set the parameters from section 2. Results arrive by email and as the build artifact `StressTestReport`.
+4. **Run:** Run pipeline -> set the parameters from section 2. Results arrive by email and as the build artifacts `StressTestReport` (custom report) and `K6DashboardReport` (k6's own dashboard, for comparison).
    **Private repos:** the tooling repo needs no token (Azure fetches it through its own GitHub connection, the Azure Pipelines GitHub app). A private **API repo** needs a read-only GitHub token (fine-grained: only the repos it must read, permission *Contents: Read-only*, with an expiry) stored as the secret variable `GITHUB_PAT` in `dev-test`; without it the clone is anonymous.
 5. Defaults for `apiName` / `profileName` are set in `azure-pipelines.yml`.
 
@@ -254,7 +255,7 @@ The profile lives in the API repo (`<apiName>/<profileName>`); the API repo need
 | Component | Role | License | Where it is stated |
 |---|---|---|---|
 | **[Grafana k6](https://github.com/grafana/k6)** | Generates the load and the measurements. Run as the official `grafana/k6` container image, unmodified, as a separate program. | **GNU AGPL-3.0** ([license text](https://github.com/grafana/k6/blob/master/LICENSE.md)) | Footer and "Test details" of `report.html` (with the exact k6 version of the run). Deliberately **not** in the email |
-| k6 web dashboard export (`k6-dashboard.html`) | k6's own dashboard file, used only as an input for the time series | part of k6 | Not published or attached |
+| k6 web dashboard export (`k6-dashboard.html`) | k6's own dashboard file, used as an input for the time series and archived as a build artifact for comparison | part of k6 | Archived, not emailed |
 | Python standard library | `send-email.py`, `report/build_report.py` | PSF license | not shown |
 | Docker images `python:3.12-alpine` (Jenkins email and report step) | Runtime | their upstream licenses | not shown |
 

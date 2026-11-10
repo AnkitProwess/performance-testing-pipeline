@@ -8,8 +8,8 @@
 #   debug          "true" adds k6 --http-debug=full (writes headers, incl. credentials, to the log)
 # Optional env: K6_IMAGE (default grafana/k6); K6_DASHBOARD_PERIOD (time between points in the dashboard charts, default 5s; k6's own default is 10s)
 # Also writes <api-repo-dir>/k6-version.txt (first line of "k6 version").
-# Also writes, as INPUTS for report/build_report.py (the only output that is published is the report.html that script builds):
-#   <api-repo-dir>/k6-dashboard.html  k6's own dashboard export (holds the time series)
+# Also writes, as INPUTS for report/build_report.py (report.html, which that script builds, is the report that is emailed):
+#   <api-repo-dir>/k6-dashboard.html  k6's own dashboard export (holds the time series; also archived by the pipelines, to compare the custom report against k6's own)
 #   <api-repo-dir>/results.json       the engine's handleSummary(): per-endpoint and overall metrics
 #
 # Credentials are read from the environment (set by the CI tool) and passed to the container by NAME only,

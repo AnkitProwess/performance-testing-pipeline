@@ -206,7 +206,9 @@ pipeline {
 
         stage('Archive Report and Email') {
             steps {
-                archiveArtifacts artifacts: 'api-repo/report.html', allowEmptyArchive: true // no report exists when k6 failed before the load started
+                // report.html = our custom report (also the email attachment); k6-dashboard.html = k6's own dashboard, archived only to compare against it.
+                // Neither exists when k6 failed before the load started.
+                archiveArtifacts artifacts: 'api-repo/report.html, api-repo/k6-dashboard.html', allowEmptyArchive: true
 
                 // A delivery problem must not hide the test result: mark the build UNSTABLE and carry on to the final check
                 catchError(buildResult: 'UNSTABLE', stageResult: 'UNSTABLE', message: 'Report email could not be sent') {
