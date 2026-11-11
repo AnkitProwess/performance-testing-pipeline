@@ -3,7 +3,7 @@
 optionally, the k6 web-dashboard export (k6-dashboard.html) which holds the time series.
 
     python report/build_report.py --results api-repo/results.json --dashboard api-repo/k6-dashboard.html \
-        --out api-repo/report.html --status PASSED --detail "SLA MISSED: ..." --build-url https://...
+        --out api-repo/report.html --build-url https://...
 
 Python standard library only. The output is self-contained (inline CSS, JS and SVG). Its only external request is the optional Inter web font
 (three <link> lines in report-template.html); offline, or with those lines removed, it falls back to the system UI font.
@@ -120,14 +120,21 @@ def read_k6_version(explicit, results_path):
     return "v" + match.group(1) if match else ""
 
 
+def strip_internal(results):
+    """Copy of results.json without the engine's own verdict block (`engineVerdict`); the report explains problems from the per-endpoint data."""
+    return {k: v for k, v in results.items() if k != "engineVerdict"}
+
+
 def main():
     parser = argparse.ArgumentParser(description="Build the custom performance report (HTML).")
     parser.add_argument("--results", required=True, help="results.json written by the k6 engine")
     parser.add_argument("--dashboard", default="", help="k6 web-dashboard export (k6-dashboard.html); supplies the time series. Optional")
     parser.add_argument("--out", required=True, help="Output HTML file")
-    parser.add_argument("--status", default="", help="PASSED / FAILED (ci/status.sh)")
-    parser.add_argument("--detail", default="", help="One-line explanation of the result (ci/status.sh detail)")
-    parser.add_argument("--exit-code", default="", help="k6 exit code, shown in the technical details")
+    # The report carries no build verdict banner and no exit code: it explains what happened from the measurements (findings per endpoint).
+    # These three flags are still accepted and ignored so that older pipeline files keep working.
+    parser.add_argument("--status", default="", help=argparse.SUPPRESS)
+    parser.add_argument("--detail", default="", help=argparse.SUPPRESS)
+    parser.add_argument("--exit-code", default="", help=argparse.SUPPRESS)
     parser.add_argument("--build-url", default="", help="Link to the CI build")
     parser.add_argument("--k6-version", default="", help="k6 version text (default: read k6-version.txt next to results.json)")
     args = parser.parse_args()
@@ -150,9 +157,9 @@ def main():
             print(f"[WARNING] Could not read the time series from {args.dashboard}: {e}. The report is built without charts over time.")
 
     payload = {
-        "results": results,
+        "results": strip_internal(results),
         "series": series,
-        "meta": {"status": args.status, "detail": args.detail, "exitCode": args.exit_code, "buildUrl": args.build_url,
+        "meta": {"buildUrl": args.build_url,
                  "k6Version": read_k6_version(args.k6_version, args.results)},
     }
     # The JSON sits inside a <script> element: neutralise anything that could end it or open an HTML comment.

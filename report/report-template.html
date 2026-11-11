@@ -73,13 +73,6 @@
   .top h1 { margin: 10px 0 8px; font-size: clamp(22px, 2.6vw, 28px); line-height: 1.15; font-weight: 650; letter-spacing: -.028em; overflow-wrap: anywhere; }
   .meta { display: flex; flex-wrap: wrap; align-items: center; row-gap: 4px; font-size: 12.5px; color: var(--ink2); }
   .meta span + span::before { content: ""; display: inline-block; width: 3px; height: 3px; border-radius: 50%; background: var(--muted); opacity: .65; margin: 0 11px; vertical-align: middle; }
-  .verdict { min-width: 260px; max-width: 400px; display: flex; gap: 11px; align-items: center; padding: 10px 15px 10px 11px; border-radius: 12px; background: var(--surface);
-    border: 1px solid var(--border); box-shadow: var(--shadow); }
-  @supports (background: color-mix(in srgb, red 10%, white)) { .verdict { border-color: color-mix(in srgb, var(--c) 32%, var(--border)); box-shadow: var(--shadow), 0 0 0 3px color-mix(in srgb, var(--c) 8%, transparent); } }
-  .verdict .ico { width: 30px; height: 30px; }
-  .verdict .ico svg { width: 15px; height: 15px; }
-  .verdict .big { font-size: 14px; font-weight: 650; letter-spacing: -.012em; line-height: 1.3; }
-  .verdict .det { font-size: 12px; color: var(--ink2); margin-top: 1px; line-height: 1.4; }
 
   .page { max-width: 1200px; margin: -28px auto 0; padding: 0 24px 48px; position: relative; }
 
@@ -134,9 +127,9 @@
   .stat .st .ico { width: 16px; height: 16px; } .stat .st .ico svg { width: 9px; height: 9px; }
   .stat .v { display: flex; align-items: flex-end; justify-content: space-between; gap: 8px; margin-top: 7px; font-size: 22px; font-weight: 620; letter-spacing: -.03em; line-height: 1.1; white-space: nowrap; }
   .stat .n { margin-top: 5px; font-size: 11.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .stat .spark { flex: none; width: 44px; height: 22px; margin-bottom: 1px; }
   .stat .meter { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: var(--track); }
   .stat .meter i { display: block; height: 100%; background: var(--c); animation: grow .9s cubic-bezier(.2,.7,.2,1) both; }
+  .stat .spark { flex: none; width: 44px; height: 22px; margin-bottom: 1px; }
 
   /* ---------- findings ---------- */
   .finds { display: grid; gap: 7px; }
@@ -231,7 +224,7 @@
 
   @media (max-width: 900px) { .grid2, .twocol { grid-template-columns: 1fr; } }
   @media (max-width: 720px) {
-    .top-in { grid-template-columns: 1fr; padding: 0 16px; } .verdict { max-width: none; min-width: 0; }
+    .top-in { grid-template-columns: 1fr; padding: 0 16px; }
     .page { padding: 0 16px 36px; } select { min-width: 0; width: 100%; } .toolbar .field { width: 100%; } .toolbar .field select { flex: 1; }
     .card { --pad: 16px; } .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } .stats .stat:last-child:nth-child(odd) { grid-column: 1 / -1; } .hint { display: none; }
   }
@@ -351,19 +344,23 @@
   var state = { scope: 'all', view: 'charts', zoom: null };
   (function readHash() { var m = /ep=(\d+)/.exec(location.hash); if (m && EPS[Number(m[1]) - 1]) state.scope = Number(m[1]); })();
 
+  // Success rate = requests that returned the expected status / requests sent to the endpoints under test, both taken from the SAME per-endpoint counters,
+  // so it can never leave 0-100 %. (k6's own request total also counts calls that are not endpoints, e.g. the OAuth token request, so it is not used here.)
   function sumOk() { return EPS.reduce(function (s, e) { return s + (e.ok || 0); }, 0); }
+  function sumRequests() { return EPS.length ? EPS.reduce(function (s, e) { return s + (e.requests || 0); }, 0) : (run.requests || 0); }
+  function rate(ok, total) { return total > 0 ? Math.min(1, Math.max(0, ok / total)) : null; }
   function scopeInfo(scope) {
     if (scope === 'all') {
-      var okAll = sumOk(), total = run.requests || 0;
+      var okAll = sumOk(), total = sumRequests();
       var okLat = lat.overallOk;
       // which requests the response times describe: 'ok' = successful ones, 'errors' = nothing succeeded, 'mixed' = older results file without a separate success latency
       var kind = okLat || okAll === total ? 'ok' : okAll === 0 ? 'errors' : 'mixed';
-      return { name: 'All endpoints', requests: total, ok: okAll, failed: total - okAll, noResponse: EPS.reduce(function (s, e) { return s + (e.noResponse || 0); }, 0),
-        successRate: total ? okAll / total : null, rps: run.requestsPerSec, lat: okLat || lat.overall, latKind: kind,
+      return { name: 'All endpoints', requests: total, ok: okAll, failed: Math.max(0, total - okAll), noResponse: EPS.reduce(function (s, e) { return s + (e.noResponse || 0); }, 0),
+        successRate: rate(okAll, total), rps: run.requestsPerSec, lat: okLat || lat.overall, latKind: kind,
         sr: S && S.all, e: null };
     }
     var e = EPS[scope - 1];
-    return { name: epName(e), requests: e.requests, ok: e.ok, failed: e.failed, noResponse: e.noResponse, successRate: e.successRate, rps: e.requestsPerSec,
+    return { name: epName(e), requests: e.requests, ok: e.ok, failed: Math.max(0, (e.requests || 0) - (e.ok || 0)), noResponse: e.noResponse, successRate: rate(e.ok || 0, e.requests || 0), rps: e.requestsPerSec,
       lat: e.latencyOk || e.latencyAll, latKind: e.latencyOk ? 'ok' : 'errors', sr: S && S.endpoints && S.endpoints[String(e.index)], e: e };
   }
   // the response-time series to draw: successful requests when there are any, otherwise whatever exists
@@ -371,18 +368,6 @@
     var sr = info.sr; if (!sr) return null;
     var hasOk = !!(sr.latencyOk && sr.latencyOk.avg.some(isNum));
     return { L: hasOk ? sr.latencyOk : sr.latency, hasOk: hasOk };
-  }
-
-  /* ---------- result verdict ---------- */
-  function bannerModel() {
-    var status = M.status, detail = M.detail || '';
-    var noSuccess = EPS.some(function (e) { return e.status === 'NO_SUCCESS'; });
-    var thrFail = (R.thresholds || []).some(function (t) { return !t.ok; });
-    if (!status) status = (run.stoppedEarly || noSuccess) ? 'FAILED' : 'PASSED';
-    var sla = /SLA MISSED/i.test(detail) || (!M.status && thrFail);
-    if (status === 'FAILED') return { level: 'crit', title: 'Failed', detail: detail };
-    if (sla) return { level: 'warn', title: 'Passed – SLA missed', detail: detail || 'The test ran, but one or more thresholds were not met.' };
-    return { level: 'good', title: 'Passed', detail: detail || 'The test ran and all thresholds were met.' };
   }
 
   /* ---------- SLA limits (from the k6 thresholds) and load stages (from the profile) ---------- */
@@ -459,10 +444,12 @@
       }
     }
     var sat = saturationHint(info); if (sat) add('warn', sat);
-    if (!out.some(function (o) { return o.level === 'crit' || o.level === 'warn'; })) {
-      add('good', scope === 'all' ? 'Every request on every endpoint returned the expected status.' : 'Every request returned the expected status.');
-      if (scope === 'all' && (R.thresholds || []).length && (R.thresholds || []).every(function (t) { return t.ok; })) add('good', 'All k6 thresholds were met.');
-    }
+    // the good news is stated whenever it is true, even when a hint above applies (hints are not problems)
+    var clean = eps.every(function (e) { return e.status === 'OK' && !e.credentialsRejected && !(e.noResponse > 0); });
+    var thr = R.thresholds || [], good = [];
+    if (clean && !run.stoppedEarly) good.push({ level: 'good', text: scope === 'all' ? 'Every request on every endpoint returned the expected status.' : 'Every request returned the expected status.' });
+    if (scope === 'all' && thr.length && thr.every(function (t) { return t.ok; })) good.push({ level: 'good', text: 'All k6 thresholds were met.' });
+    out = good.concat(out);
     return out;
   }
 
@@ -741,7 +728,7 @@
       return h('tr', { class: 'click', onclick: function () { select(e.index); } },
         h('td', null, methBadge(e.method), h('button', { class: 'linklike', 'aria-label': 'Show endpoint ' + e.index }, '#' + e.index + ' ' + pathOf(e.url))),
         h('td', null, resultPill(e)),
-        h('td', { class: 'num' }, fmtInt(e.requests)), h('td', { class: 'num' }, fmtPct(e.successRate)), h('td', { class: 'num' }, fmtNum(e.requestsPerSec, 1)),
+        h('td', { class: 'num' }, fmtInt(e.requests)), h('td', { class: 'num' }, fmtPct(rate(e.ok || 0, e.requests || 0))), h('td', { class: 'num' }, fmtNum(e.requestsPerSec, 1)),
         h('td', { class: 'num' }, L ? fmtMs(L.median) : '–'),
         h('td', { class: 'num', style: 'min-width:110px' }, L ? fmtMs(L.p95) : '–', e.latencyOk ? h('div', { class: 'minibar', style: 'width:' + Math.max(3, e.latencyOk.p95 / max * 100) + '%' }) : null),
         h('td', { class: 'num' }, L ? fmtMs(L.p99) : '–'), h('td', { class: 'num' }, L ? fmtMs(L.max) : '–'));
@@ -874,7 +861,6 @@
         kv('Duration', fmtDur(run.durationSec)), kv('Peak virtual users', fmtInt(run.vusMax)), kv('Iterations', fmtInt(run.iterations) + ' (' + fmtNum(run.iterationsPerSec, 2) + ' /s)'),
         kv('Data', fmtBytes(run.dataReceivedBytes) + ' received, ' + fmtBytes(run.dataSentBytes) + ' sent'),
         kv('Checks passed', fmtPct(run.checksPassRate)),
-        M.exitCode !== '' && M.exitCode != null ? kv('k6 exit code', M.exitCode + ' (0 passed, 99 thresholds crossed, 108 test could not run)') : null,
         M.buildUrl ? kv('Build', h('a', { href: M.buildUrl, rel: 'noopener' }, 'open the CI build')) : null,
         kv('Load-testing tool', h('span', null, ext(K6_DOCS, 'Grafana k6'), M.k6Version ? ' ' + M.k6Version : '', ' – open-source load-testing tool by Grafana Labs')),
         kv('k6 license', h('span', null, 'GNU Affero General Public License v3.0 (AGPL-3.0). ', ext(K6_LICENSE, 'License text'), ' · ', ext(K6_REPO, 'Source code'))),
@@ -906,14 +892,13 @@
     pending.forEach(function (fn) { fn(); });
   }
   function build() {
-    var b = bannerModel(), P2 = R.profile || {};
+    var P2 = R.profile || {};
     var logo = h('span', { class: 'logo' }, sv('svg', { viewBox: '0 0 24 24', fill: 'none', stroke: '#ffffff', 'stroke-width': 2.4, 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'aria-hidden': 'true' },
       sv('path', { d: 'M3 17l5-6 4 3 8-9' }), sv('path', { d: 'M3 21h18' })));
     var chips = [P2.artifactVersion ? 'Version ' + P2.artifactVersion : null, R.generatedAt ? new Date(R.generatedAt).toLocaleString() : null,
-      isNum(run.durationSec) ? fmtDur(run.durationSec) + ' test' : null, isNum(run.vusMax) ? 'up to ' + fmtInt(run.vusMax) + ' virtual users' : null, isNum(run.requests) ? fmtInt(run.requests) + ' requests' : null].filter(Boolean);
+      isNum(run.durationSec) ? fmtDur(run.durationSec) + ' test' : null, isNum(run.vusMax) ? 'up to ' + fmtInt(run.vusMax) + ' virtual users' : null, sumRequests() ? fmtInt(sumRequests()) + ' requests' : null].filter(Boolean);
     var hero = h('header', { class: 'top' }, h('div', { class: 'top-in' },
-      h('div', null, h('div', { class: 'brand' }, logo, 'Performance test report'), h('h1', null, P2.apiName || 'API'), h('div', { class: 'meta' }, chips.map(function (c) { return h('span', null, c); }))),
-      h('div', { class: 'verdict', style: '--c:var(--' + b.level + ')' }, icon(b.level), h('div', null, h('div', { class: 'big' }, b.title), h('div', { class: 'det' }, b.detail)))));
+      h('div', null, h('div', { class: 'brand' }, logo, 'Performance test report'), h('h1', null, P2.apiName || 'API'), h('div', { class: 'meta' }, chips.map(function (c) { return h('span', null, c); })))));
     sel = h('select', { id: 'ep', 'aria-label': 'Endpoint', onchange: function () { select(this.value === 'all' ? 'all' : Number(this.value)); } },
       h('option', { value: 'all' }, 'All endpoints (' + EPS.length + ')'),
       EPS.map(function (e) { return h('option', { value: String(e.index) }, epName(e) + (e.credentialsRejected ? '  ✕ credentials rejected' : e.status === 'OK' ? '' : e.status === 'NO_SUCCESS' ? '  ✕ failing' : e.status === 'PARTIAL' ? '  ! errors' : '')); }));

@@ -185,8 +185,6 @@ pipeline {
                 // The custom report is a convenience: if it cannot be built the stage turns yellow but the build result is untouched. Runs in a container, so the agent needs no Python.
                 catchError(buildResult: 'SUCCESS', stageResult: 'UNSTABLE', message: 'Custom report could not be built') {
                     sh '''
-                        STATUS=$(sh master-pipeline-repo/ci/status.sh "$K6_EXIT_CODE")
-                        DETAIL=$(sh master-pipeline-repo/ci/status.sh "$K6_EXIT_CODE" detail api-repo/k6-reason.txt)
                         docker run --rm \
                             --user "$(id -u):$(id -g)" \
                             -v "$WORKSPACE:/work" \
@@ -195,9 +193,6 @@ pipeline {
                                 --results /work/api-repo/results.json \
                                 --dashboard /work/api-repo/k6-dashboard.html \
                                 --out /work/api-repo/report.html \
-                                --status "$STATUS" \
-                                --detail "$DETAIL" \
-                                --exit-code "$K6_EXIT_CODE" \
                                 --build-url "$BUILD_URL"
                     '''
                 }

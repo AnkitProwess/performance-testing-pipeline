@@ -329,7 +329,7 @@ Because k6 virtual users cannot share information while the test runs, bad crede
 | `all` | ONE probe request to every endpoint, writes included. |
 | `off` | No probe. Every VU finds out for itself, so bad credentials are sent once per VU and can lock an account. |
 
-- An endpoint that answers 401 or 403 (and whose profile did not set `expectedStatus` to that code) is marked **rejected** and is never called again. The other endpoints are load tested normally, the report shows the endpoint as "Credentials rejected", and the build still **fails** (exit 108, `CREDENTIALS_REJECTED`).
+- An endpoint that answers 401 or 403 (and whose profile did not set `expectedStatus` to that code) is marked **rejected** and is never called again. The other endpoints are load tested normally, the report shows the endpoint as "Credentials rejected" with a finding that explains it, and the build still **fails** (exit 108, `CREDENTIALS_REJECTED`).
 - Only when **every** endpoint is rejected does the run stop at once, before any load. The same per-endpoint rule applies when a token expires mid-run, and when an OAuth token cannot be fetched (only the endpoints that use that token are skipped).
 - One case is found by the load instead of the probe: a write endpoint that answers 403 (no permission) while the read endpoints of the same credentials work. Each VU then sends it once before skipping it, so its request count is bounded by the peak number of VUs. The result is the same.
 - Probe requests of read-only endpoints are real requests and appear in the report's numbers.
@@ -353,15 +353,16 @@ The engine writes `results.json` (schema `perf-results/1`) at the end of every r
 
 | Block | Answers |
 |---|---|
-| Result banner | PASSED, PASSED - SLA missed, or FAILED, with the one-line reason |
 | Endpoint drop-down | Scopes everything to "All endpoints" or one endpoint (link: `report.html#ep=2`) |
 | Stat tiles | Requests, success rate, throughput, average, p95, p99, slowest, each with a trend line |
-| What stands out | Plain-language findings: rejected credentials, failing endpoints and status codes, missed SLA thresholds, timeouts, "passed only because errors are fast", the slowest endpoint |
-| Endpoints table | One row per endpoint with a result pill (OK / Partly failing / Failing / Credentials rejected / Not called) |
-| Performance overview | Request rate, p95 request duration and failed requests on one timeline (as in k6's own overview) |
+| What stands out | Plain-language findings that explain the run: everything returned the expected status, all thresholds met, SLA missed (with the observed value), an endpoint with rejected credentials, an endpoint that never returned the expected status (with the status codes seen, e.g. 404), timeouts, the slowest endpoint, a saturation hint |
+| Endpoints table | One row per endpoint with a result pill (OK / Partly failing / Failing / Credentials rejected / Not called), requests, success rate, req/s, median, p95, p99, slowest |
+| Performance overview | Request rate, p95 request duration and error rate on one timeline (as in k6's own overview) |
 | Response time, Virtual users | Does latency grow with load? The load profile over time |
 | p95 and throughput by endpoint | Which endpoint is slow, over time (drawn for 2-3 endpoints) |
 | Distribution, status codes, SLA thresholds, time split | Percentile bars; every status code with its meaning; each threshold with the observed value; server time vs connection set-up vs transfer |
+
+**No build verdict at the top.** The report has no PASSED / FAILED banner and no k6 exit code: the header only identifies the test. The **success rate** tile stays: it is the requests that returned the expected status divided by the requests sent to the endpoints under test (both from the same per-endpoint counters, so it can never leave 0-100 %; k6's own request total is not used because it also counts calls such as the OAuth token request). The reasons are given by the findings and the endpoint pills, and the charts show the error rate over time. The pass / fail decision itself stays in the build status and the build log (section 7). The engine's own `engineVerdict` block is not embedded in the report.
 
 Interaction: a live legend and a crosshair shared by all charts, drag-to-zoom (double-click or Escape to reset), a Charts/Tables switch, a Light | Dark switch (Light by default) and a Print / PDF button.
 
