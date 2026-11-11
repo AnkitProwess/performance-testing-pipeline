@@ -1,0 +1,40 @@
+# azure-pipelines-api-repo.yml  (OPTIONAL: pipeline owned by the API repo, "imported mode")
+# PLACE THIS IN YOUR API CODE REPOSITORY. The API repo then owns a small pipeline that calls the central
+# performance-testing template. (The normal way to run a test is the manual runner: the root azure-pipelines.yml of the tooling repo. Use this file only if an API team wants its own pipeline.)
+#
+# Before the first run:
+#   1. Replace every <...> value below.
+#   2. Create the four variable groups in Pipelines -> Library and permit this pipeline to use them:
+#        perf-client-id, perf-oauth, perf-basic-auth, perf-smtp   (names and variables: INSTALLATION-STEPS.md, Part 2)
+#   3. Create a pipeline in Azure DevOps that points at THIS (API) repo and uses this file.
+
+# Runs when the load profile changes. Remove the trigger block (or set "trigger: none") for manual runs only.
+trigger:
+  branches:
+    include:
+      - main
+  paths:
+    include:
+      - <my-api>/<load-profile.json> # same folder and file name as apiName / profileName below
+
+# The central tooling repository that holds k6-pipeline-job-template.yml
+resources:
+  repositories:
+    - repository: performance-testing-pipeline-template
+      type: github                                   # the tooling repo is on GitHub (use "git" only for an Azure Repos repository)
+      name: "<owner>/<performance-testing-pipeline>" # GitHub: 'owner/repository'
+      endpoint: "<GitHubServiceConnection>"          # name of the GitHub service connection (Project settings -> Service connections)
+      ref: refs/heads/main
+
+stages:
+  - stage: PerformanceTesting
+    displayName: 'Execute API Performance Stress Testing'
+    jobs:
+      # Call the central reusable job template. In this mode the API repo is the pipeline's own repo, so it is checked out by Azure (apiRepoUrl stays empty).
+      - template: k6-pipeline-job-template.yml@performance-testing-pipeline-template
+        parameters:
+          apiName: <my-api>                          # folder in THIS repo that holds the load profile (case-sensitive; empty = repo root)
+          profileName: '<load-profile.json>'         # load profile JSON file name (default if omitted: load-profile.json)
+          reportRecipient: '<team@example.com>'      # comma separated list
+          reportCc: 'none'                           # optional Cc, comma separated; 'none' = no Cc
+          debug: 'false'                             # 'true' writes request / response headers (incl. credentials) to the log: only for troubleshooting

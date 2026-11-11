@@ -20,7 +20,7 @@ Follow **Part 1**, then **either Part 2 (Azure DevOps) or Part 3 (Jenkins)**, th
 1. **Put this tooling repository in GitHub** (push this folder, branch `main`).
 2. **Prepare the API repository** (the repo to be tested):
    - It must be **public** (the pipeline clones it anonymously).
-   - Add a load-profile JSON at the root or in a folder, e.g. `my-api/load-profile.json`. Start from `templates/load-profile*.json`; the format is in [README.md](README.md), section 3.
+   - Add a load-profile JSON at the root or in a folder, e.g. `my-api/load-profile.json`. Start from `templates/load-profile-advanced.json` (or `-batch.json`); the format is in [README.md](README.md), section 3.
    - Use `{{NAME}}` tokens for any secret (e.g. `{{OAUTH_CLIENT_SECRET}}`); never commit a real secret.
 3. **Decide which credentials your profile needs** and collect the values:
 
@@ -86,10 +86,11 @@ In your project open **Pipelines -> Library -> + Variable group** and create the
 Use this when an API team wants a pipeline inside its own repository that calls this one as a template.
 
 1. In the API repo add the load profile (root or folder).
-2. Copy `templates/azure-pipelines.yml` into the API repo and edit it:
+2. Copy `templates/azure-pipelines-api-repo.yml` into the API repo (as `azure-pipelines.yml`) and edit it:
    - `resources.repositories[].name`: `<organisation or user>/<tooling repo>` of this repository.
-   - `endpoint`: the name of your Azure DevOps **GitHub service connection** (Project settings -> Service connections). For a repository hosted on GitHub, Azure expects the resource to be declared with `type: github`; the sample file says `type: git`, so check it against your setup before the first run.
-   - `parameters`: `apiName` (folder), `reportRecipient`, and optionally `profileName` (default `load-profile.json`) and `debug`.
+   - `endpoint`: the name of your Azure DevOps **GitHub service connection** (Project settings -> Service connections). The template declares the resource with `type: github` (the tooling repo is on GitHub); use `type: git` only if the tooling repo lives in Azure Repos.
+   - `trigger.paths`: the profile file that should start a run when it changes (same folder and file name as `apiName` / `profileName`), or delete the `trigger` block for manual runs only.
+   - `parameters`: `apiName` (folder), `profileName`, `reportRecipient`, and optionally `reportCc` (`none` = no Cc) and `debug`. Every value to replace is written as `<...>`.
 3. Create a pipeline in Azure DevOps that points to **the API repo** and uses that YAML.
 4. Create the same four variable groups as in Step 2.1, and permit the pipeline to use them.
 
@@ -166,7 +167,7 @@ SMTP_TLS  = 'ssl'
 
 ### Step 3.7 (optional): A Jenkins job owned by an API team
 
-Copy `templates/Jenkinsfile` into the API repo and fill in its `environment` block (`PERF_JOB_NAME`, `API_REPO_URL`, `API_NAME`, `PROFILE_NAME`, `REPORT_RECIPIENT`). It only calls the central job with those values, so test logic, credentials and email stay in one place. Create a Pipeline job for that repo (*Pipeline script from SCM*).
+Copy `templates/Jenkinsfile` into the API repo and fill in its `environment` block (`PERF_JOB_NAME`, `API_REPO_URL`, `API_REPO_BRANCH`, `API_REPO_CRED_ID` for a private repo, `API_NAME`, `PROFILE_NAME`, `REPORT_RECIPIENT`, optionally `REPORT_CC`; every value to replace is written as `<...>`). It only calls the central job with those values, so test logic, credentials and email stay in one place. Create a Pipeline job for that repo (*Pipeline script from SCM*).
 
 ---
 
@@ -227,15 +228,15 @@ You should see `Email report sent successfully!`. The email lists the test time 
 
 Run one smoke test that needs no credentials:
 
-1. In your **public API repo**, add a folder (e.g. `smoke`) with the file `templates/load-profile-batch.json` from this repo (two public `httpbin.org` GET calls).
-2. Run the pipeline with `apiName = smoke` and `profileName = load-profile-batch.json`, and your own address as recipient.
+1. In your **public API repo**, add a folder (e.g. `smoke`) with the file `templates/load-profile-smoke.json` from this repo (two public `httpbin.org` GET calls, no credentials).
+2. Run the pipeline with `apiName = smoke` and `profileName = load-profile-smoke.json`, and your own address as recipient.
 3. Check the outcome:
 
    | Check | Expected |
    |---|---|
    | Build | Green |
    | k6 step log | Ends with the summary and `k6 exit code: 0` |
-   | Email | Subject `Performance Test Report - Parallel-Batch-StressTest - Version 1.0.0`; body shows the API name, the test time and the 2 endpoints; `report.html` attached; no result label |
+   | Email | Subject `Performance Test Report - Smoke-Test-Batch - Version 1.0.0`; body shows the API name, the test time and the 2 endpoints; `report.html` attached; no result label |
    | Report | Opens in a browser, shows 2 endpoints, status `PASSED` |
 
 4. To verify the credential handling, run once with a profile that uses wrong credentials. Expected: build **red**, the report and build log show a `CREDENTIALS_REJECTED` reason, one request per endpoint (the email itself does not state the result).

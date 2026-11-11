@@ -1,0 +1,42 @@
+{
+    "apiName": "Smoke-Test-Batch",
+    "artifact_version": "1.0.0",
+    "stages": [
+        {
+            "duration": "5s",
+            "target": 2
+        },
+        {
+            "duration": "10s",
+            "target": 3
+        },
+        {
+            "duration": "5s",
+            "target": 1
+        }
+    ],
+    "thresholds": {
+        "http_req_failed": [
+            "rate<0.05"
+        ],
+        "http_req_duration": [
+            "p(95)<3000"
+        ]
+    },
+    "endpoints": [
+        {
+            "endpoint": "https://httpbin.org/get",
+            "method": "GET",
+            "batchGroup": "parallel-reads",
+            "expectedStatus": 200,
+            "sleepDuration": 0.5
+        },
+        {
+            "endpoint": "https://httpbin.org/delay/1",
+            "method": "GET",
+            "batchGroup": "parallel-reads",
+            "expectedStatus": 200,
+            "sleepDuration": 0.5
+        }
+    ]
+}

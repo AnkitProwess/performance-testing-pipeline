@@ -1,30 +1,52 @@
-# azure-pipelines.yml
-# PLACE THIS IN YOUR API CODE REPOSITORY TO TRIGGER AUTOMATED PERFORMANCE TESTS
+# templates/azure-pipelines.yml  (TEMPLATE ONLY)
+# A starter copy of the manual runner, for a team that sets up its own tooling repo. NO pipeline uses this file:
+# the pipeline that is actually run is the azure-pipelines.yml in the ROOT of this repo.
+#
+# To use it: copy it to the root of a tooling repo (next to k6-pipeline-job-template.yml) as azure-pipelines.yml, replace every <...> value,
+# and create ONE Azure DevOps pipeline from it (Pipelines -> New pipeline -> GitHub -> repo -> Existing Azure Pipelines YAML file).
+# Nothing runs on a git push (trigger: none): a user clicks "Run pipeline" and fills in the form below; the defaults only save typing.
+#
+# Needs four variable groups (Pipelines -> Library), each permitted for the pipeline: perf-client-id, perf-oauth, perf-basic-auth, perf-smtp
+# (names and variables: INSTALLATION-STEPS.md, Part 2).
+# If the API team should own the pipeline in its own repo instead, see templates/azure-pipelines-api-repo.yml.
 
-# Triggers: Customize as needed. For example, manual runs or on main branch updates.
-trigger:
-  branches:
-    include:
-      - main
-  paths:
-    include:
-      - load-profile.json # Run whenever the load test profile configuration is modified
+trigger: none # Manual run only
 
-# Declare the reference to the master performance testing template repository
-resources:
-  repositories:
-    - repository: performance-testing-pipeline-template
-      type: git
-      name: amit21kv/performance-testing-pipeline # Format: 'ProjectName/RepositoryName' if across different DevOps projects
-      endpoint: "GitHubServiceConnection"   # Name of the Service Connection in Azure DevOps
-      ref: refs/heads/main            # The default branch containing the templates
+parameters:
+  - name: apiRepoUrl
+    type: string
+    displayName: "Target API Git Repo URL"
+    default: "https://github.com/<owner>/<your-api-repo>.git"
+  - name: reportRecipient
+    type: string
+    displayName: "Email Report Recipient(s) (comma separated)"
+    default: "<team@example.com>"
+  - name: reportCc
+    type: string
+    displayName: "Email Cc (optional, comma separated; 'none' = no Cc)"
+    default: "none" # an empty default makes Azure DevOps show the field as required, so 'none' means no Cc
+  - name: apiName
+    type: string
+    displayName: "API Name (folder name in the API repo, case-sensitive)"
+    default: "<my-api>"
+  - name: profileName
+    type: string
+    displayName: "Profile Name (JSON file name)"
+    default: "<load-profile.json>"
+  - name: debug
+    type: string
+    displayName: "Enable HTTP Debugging"
+    default: "false"
 
 stages:
   - stage: PerformanceTesting
     displayName: 'Execute API Performance Stress Testing'
     jobs:
-      # Call the master reusable Job Template
-      - template: k6-pipeline-job-template.yml@performance-testing-pipeline-template
+      - template: k6-pipeline-job-template.yml
         parameters:
-          apiName: mule-employees-xapi      # the directory name in Git repo where the load-profile.json file resides 
-          reportRecipient: 'api-team-alerts@company.com' # Target recipient for email reports
+          apiRepoUrl: ${{ parameters.apiRepoUrl }}
+          reportRecipient: ${{ parameters.reportRecipient }}
+          reportCc: ${{ parameters.reportCc }}
+          apiName: ${{ parameters.apiName }}
+          profileName: ${{ parameters.profileName }}
+          debug: ${{ parameters.debug }}

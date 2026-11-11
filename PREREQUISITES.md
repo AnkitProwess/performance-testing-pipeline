@@ -33,7 +33,7 @@ You need **one** CI platform: Azure DevOps **or** Jenkins. Both run the same eng
 
 It must contain:
 - A load-profile JSON file, at the repo root or in a folder (the folder name is the `apiName` run parameter, case-sensitive).
-- A valid profile (see the profile format in [README.md](README.md), section 3). Profiles can be taken from `templates/load-profile*.json`.
+- A valid profile (see the profile format in [README.md](README.md), section 3). Start from `templates/load-profile-advanced.json` or `load-profile-batch.json`.
 - Nothing else: the repo needs no pipeline YAML when the pipeline is run by URL (manual mode).
 
 ---
@@ -139,7 +139,7 @@ Only needed for `run-local.ps1` / `run-local.sh` (not part of the CI flow):
 | Docker **or** the k6 binary | The scripts use Docker when available, otherwise a local `k6` |
 | PowerShell (Windows) or Bash (Linux / macOS) | For `run-local.ps1` / `run-local.sh` |
 | Python 3 | Only if you want to build the custom report locally with `report/build_report.py` |
-| Internet access | The sample profiles in `templates/` call `https://httpbin.org` |
+| Internet access | The basic and smoke profiles in `templates/` call `https://httpbin.org` |
 
 ---
 

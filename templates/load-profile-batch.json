@@ -1,26 +1,47 @@
 {
-  "apiName": "Parallel-Batch-StressTest",
-  "artifact_version": "1.0.0",
-  "stages": [
-    {
-      "duration": "5s",
-      "target": 2
+    "apiName": "<Your API Name> - Batch",
+    "artifact_version": "1.0.0",
+    "authType": "CLIENT_ID_ENFORCEMENT",
+    "authParameters": {
+        "clientId": "{{CLIENT_ID}}",
+        "clientSecret": "{{CLIENT_SECRET}}"
     },
-    {
-      "duration": "5s",
-      "target": 0
-    }
-  ],
-  "endpoints": [
-    {
-      "endpoint": "https://httpbin.org/get",
-      "method": "GET",
-      "batchGroup": "batch-1"
+    "stages": [
+        {
+            "duration": "5s",
+            "target": 2
+        },
+        {
+            "duration": "10s",
+            "target": 3
+        },
+        {
+            "duration": "5s",
+            "target": 1
+        }
+    ],
+    "thresholds": {
+        "http_req_failed": [
+            "rate<0.005"
+        ],
+        "http_req_duration": [
+            "p(95)<3000"
+        ]
     },
-    {
-      "endpoint": "https://httpbin.org/delay/1",
-      "method": "GET",
-      "batchGroup": "batch-1"
-    }
-  ]
+    "endpoints": [
+        {
+            "endpoint": "https://<your-api-host>/api/orders/ORD102",
+            "method": "GET",
+            "batchGroup": "orders-batch",
+            "expectedStatus": 200,
+            "sleepDuration": 0.5
+        },
+        {
+            "endpoint": "https://<your-api-host>/api/orders/ORD113",
+            "method": "GET",
+            "batchGroup": "orders-batch",
+            "expectedStatus": 200,
+            "sleepDuration": 0.5
+        }
+    ]
 }
