@@ -216,9 +216,8 @@ pipeline {
                         ])
                         withCredentials(bindings) {
                             sh '''
-                                # PASSED / FAILED (+ detail line): one rule shared with Azure DevOps (ci/status.sh)
+                                # Only for the build log: the email itself does not state the result (ci/status.sh is the shared rule)
                                 STATUS=$(sh master-pipeline-repo/ci/status.sh "$K6_EXIT_CODE")
-                                DETAIL=$(sh master-pipeline-repo/ci/status.sh "$K6_EXIT_CODE" detail api-repo/k6-reason.txt)
                                 echo "Sending report email for $PROFILE_REL, status: $STATUS"
 
                                 # send-email.py runs in a container, so the agent needs no Python. Secrets are passed by name only.
@@ -240,8 +239,6 @@ pipeline {
                                         --to "$REPORT_RECIPIENT" \
                                         --cc "$REPORT_CC" \
                                         --profile "/work/api-repo/$PROFILE_REL" \
-                                        --status "$STATUS" \
-                                        --detail "$DETAIL" \
                                         --report /work/api-repo/report.html \
                                         --build-url "$BUILD_URL"
                             '''

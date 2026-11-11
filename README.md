@@ -25,7 +25,7 @@ graph TD
     E -->|"Writes"| F["results.json + k6-dashboard.html"]
     F -->|"4. report/build_report.py"| G["report.html (custom report)"]
     P -->|"5. Archives"| G
-    P -->|"6. send-email.py"| H["Email: PASSED / FAILED + report attached"]
+    P -->|"6. send-email.py"| H["Email: test summary + endpoints + report attached"]
     P -->|"7. ci/status.sh"| I["Build result from the k6 exit code"]
 ```
 
@@ -48,9 +48,9 @@ graph TD
 | `k6-engine-script.js` | both | Generic k6 runner. Reads the profile JSON and resolves `{{VAR}}` tokens from environment variables. |
 | `auth/` | both | Pluggable authentication: OAuth 2.0 client credentials, client ID enforcement, Basic. |
 | `ci/run-k6.sh` | both | The one place that holds the `docker run` command and the list of credential variables passed to k6. |
-| `ci/status.sh` | both | The one rule that turns a k6 exit code into `PASSED` / `FAILED` and the one-line message in the email. |
+| `ci/status.sh` | both | The one rule that turns a k6 exit code into `PASSED` / `FAILED` and the one-line reason (build log and report; the email does not state the result). |
 | `report/` | both | `build_report.py` and `report-template.html`: the custom report. |
-| `send-email.py` | both | SMTP sender (report attached, result label in the subject). |
+| `send-email.py` | both | SMTP sender (test summary, endpoint list and the report attached; no result label). |
 | `templates/` | API teams | Starter files: `Jenkinsfile`, `azure-pipelines.yml`, example profiles. |
 | `run-local.sh`, `run-local.ps1`, `local-run/` | developers | Run a profile on your own machine (not part of the CI flow). |
 
@@ -273,7 +273,10 @@ If a profile needs a value that was never supplied, or a variable that still hol
 
 ---
 
-## 7. Results: What the Build and the Email Say
+## 7. Results: What the Build and the Report Say
+
+> [!NOTE]
+> The **email does not state the result**. It identifies the test (API, date and time, endpoints) and attaches the report. The result lives in the build status, the build log and `report.html`. The labels below are the build / report labels.
 
 ```mermaid
 graph LR
@@ -282,17 +285,17 @@ graph LR
     K -->|"108 or 107 or other"| F1["FAILED + exact reason, build red"]
 ```
 
-| k6 exit | Meaning | Build | Email |
+| k6 exit | Meaning | Build | Label in the report / build log |
 |---|---|---|---|
-| `0` | All thresholds met | green | `[PASSED]` |
-| `99` | The test ran, but an SLA threshold (latency / error rate) was crossed | **green with a warning** (Azure: "succeeded with issues"; Jenkins: yellow stage, build stays SUCCESS) | `[PASSED]` with the message **"SLA MISSED: ..."** below it |
-| `108` | The engine **stopped the run**, or the run finished but **an endpoint never succeeded** | **red** | `[FAILED]` + the exact reason (report attached when one exists) |
-| `107` | The test could not start: setup or script error | **red** | `[FAILED]` + the exact reason |
-| anything else | The test could not run (Docker error, killed process, ...) | **red** | `[FAILED]` + what the exit code proves |
+| `0` | All thresholds met | green | PASSED |
+| `99` | The test ran, but an SLA threshold (latency / error rate) was crossed | **green with a warning** (Azure: "succeeded with issues"; Jenkins: yellow stage, build stays SUCCESS) | PASSED with the message **"SLA MISSED: ..."** |
+| `108` | The engine **stopped the run**, or the run finished but **an endpoint never succeeded** | **red** | FAILED + the exact reason (report attached when one exists) |
+| `107` | The test could not start: setup or script error | **red** | FAILED + the exact reason |
+| anything else | The test could not run (Docker error, killed process, ...) | **red** | FAILED + what the exit code proves |
 
 - `FAILED` is reserved for "the test could not run". An SLA miss is shown as `PASSED` (the test itself worked) with an "SLA MISSED" message, so read that line, not just the subject.
 - **The run completes once the API answers.** 404, 409, 400 or 5xx on one endpoint never stop the test, so every endpoint is exercised and the report is generated. Only two things stop a run early: rejected credentials for **every** endpoint, and an API that never answers (10 requests in a row without any HTTP response).
-- **An endpoint that never succeeds fails the build, with the report.** If an endpoint had requests but **zero** responses with its `expectedStatus` (wrong URL, 409 on every PUT, 400 for a bad body, ...), the result is `[FAILED]` (exit 108 via `ci/run-k6.sh`) and the report is attached. An endpoint that fails only *some* of the time is an SLA matter: the thresholds decide. If a status other than 200 is the correct answer, set `expectedStatus` to it.
+- **An endpoint that never succeeds fails the build, with the report.** If an endpoint had requests but **zero** responses with its `expectedStatus` (wrong URL, 409 on every PUT, 400 for a bad body, ...), the result is FAILED (exit 108 via `ci/run-k6.sh`) and the report is attached. An endpoint that fails only *some* of the time is an SLA matter: the thresholds decide. If a status other than 200 is the correct answer, set `expectedStatus` to it.
 - The k6 log ends with a per-endpoint table (requests, how many returned the expected status, which HTTP codes came back instead) and the threshold results.
 - Rules live in `ci/status.sh` and `ci/run-k6.sh`. Changing them changes both tools.
 
@@ -300,7 +303,7 @@ graph LR
 
 The same exit code can have several causes (108 covers both rejected credentials and "nothing ever succeeded"; 107 covers any setup error), so the reason is **not guessed from the exit code**. The engine states it itself in one log line, `PERF_REASON|<CODE>|<text>`, written just before it stops. `ci/run-k6.sh` keeps the first such line in `k6-reason.txt` and `ci/status.sh` puts the text into the email and the build log. The text only contains facts the engine knows (a status code, a key name, the identity provider's standard error code). It never contains a secret, a token, a response body or a query string.
 
-| Reason code | Email says (summary) |
+| Reason code | Report and build log say (summary) |
 |---|---|
 | `CREDENTIALS_REJECTED` | The API answered HTTP 401 / 403; the credentials or token were not accepted, either for every endpoint (run stopped before any load) or only for the endpoints named (those were skipped, the others were tested and the report is attached). |
 | `NO_RESPONSE` | The first 10 requests of a virtual user got no HTTP response: the API was never reached. Check host name, network and that the API is running. |
@@ -377,9 +380,9 @@ python report/build_report.py --results results.json --dashboard k6-dashboard.ht
 
 `send-email.py` sends the report over SMTP (implicit SSL for port 465 or `SMTP_TLS=ssl`, otherwise STARTTLS).
 
-- **Subject:** `[RESULT] Performance Test Report - <apiName> - Version <artifact_version>`, with the values read from the profile.
+- **Subject:** `Performance Test Report - <apiName> - Version <artifact_version>`, with the values read from the profile. It carries no result label.
 - **Recipients:** `reportRecipient` plus `MANDATORY_RECIPIENTS` if defined (none by default), de-duplicated. `reportCc` goes into the Cc header.
-- **Body:** the result label (green `PASSED` / red `FAILED`), the one-line reason, the pipeline name, build number and a link to the build. The `report.html` file is attached. If the test never generated load, no report is attached and the email says so.
+- **Body (no result, by design):** a *Test summary* table (API tested, version, date and time in UTC, test duration, peak virtual users, number of endpoints, load profile file), an *Endpoints tested* table (number, method coloured badge, endpoint name, URL without query string) and a *Pipeline run* table (pipeline, build number, link). Everything comes from the load profile (so it is complete even when the test failed) and from `results.json` next to the report (actual start time and duration; without it the send time and the planned duration from `stages` are shown). `report.html` is attached; if the test never generated load, no report is attached and the email says so. Endpoints use `name` when the profile gives one, else their URL path.
 - A delivery failure never hides the test result: Azure logs it and carries on, Jenkins marks the build UNSTABLE.
 
 Setup of the SMTP settings is in [INSTALLATION-STEPS.md](INSTALLATION-STEPS.md).
@@ -417,9 +420,9 @@ chmod +x run-local.sh
 | Symptom | Likely cause |
 |---|---|
 | Azure run fails before any step: variable group not found / not authorised | A group the template references does not exist, is named differently, or the pipeline is not authorised for it |
-| `[FAILED]`, k6 exit 108 | The email states the reason (`CREDENTIALS_REJECTED` or `ENDPOINT_NO_SUCCESS`, see section 7). The same text is in the k6 step log |
-| `[FAILED]`, k6 exit 107 | Setup or script error. The email states the reason when the engine knows it (token request failed, missing value, bad profile). Otherwise read the k6 step log |
-| `[PASSED]` with "SLA MISSED" in the message | The test is fine; latency or error rate crossed a threshold in the profile. Open the report, or agree new thresholds with the team lead |
+| FAILED, k6 exit 108 | The report and build log state the reason (`CREDENTIALS_REJECTED` or `ENDPOINT_NO_SUCCESS`, see section 7). The same text is in the k6 step log |
+| FAILED, k6 exit 107 | Setup or script error. The build log states the reason when the engine knows it (token request failed, missing value, bad profile). Otherwise read the k6 step log |
+| PASSED with "SLA MISSED" in the build log and report | The test is fine; latency or error rate crossed a threshold in the profile. Open the report, or agree new thresholds with the team lead |
 | Azure: "No hosted parallelism has been purchased or granted" | See the Azure steps in [PREREQUISITES.md](PREREQUISITES.md) |
 | Jenkins: "Load profile not found in the API repo" | Check `apiName` (case-sensitive), `profileName` and `apiRepoBranch` |
 | Clone fails with "repository not found" | The API repo is private or the URL is wrong. It must be public in manual mode |

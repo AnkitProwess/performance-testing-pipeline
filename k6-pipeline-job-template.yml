@@ -138,15 +138,13 @@ jobs:
             HOST_PROFILE_PATH="$(Pipeline.Workspace)/s/api-repo/$API_NAME/$PROFILE_NAME"
           fi
 
-          # PASSED / FAILED (+ detail line): one rule shared with Jenkins (ci/status.sh)
+          # Only for the build log: the email itself does not state the result (ci/status.sh is the shared rule)
           CI_DIR="$(Pipeline.Workspace)/s/master-pipeline-repo/ci"
           STATUS=$(sh "$CI_DIR/status.sh" "$K6_EXIT_CODE")
-          REASON_FILE="$(Pipeline.Workspace)/s/api-repo/k6-reason.txt"
-          DETAIL=$(sh "$CI_DIR/status.sh" "$K6_EXIT_CODE" detail "$REASON_FILE")
           echo "Sending report email for $HOST_PROFILE_PATH, status: $STATUS"
 
           # apiName / artifact_version for the subject are read from the profile by send-email.py (--profile)
-          python $(Pipeline.Workspace)/s/master-pipeline-repo/send-email.py             --to "${{ parameters.reportRecipient }}"             --cc "${{ parameters.reportCc }}"             --profile "$HOST_PROFILE_PATH"             --status "$STATUS"             --detail "$DETAIL"             --report "$(Pipeline.Workspace)/s/api-repo/report.html"             --build-url "$(System.TeamFoundationCollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId)"
+          python $(Pipeline.Workspace)/s/master-pipeline-repo/send-email.py             --to "${{ parameters.reportRecipient }}"             --cc "${{ parameters.reportCc }}"             --profile "$HOST_PROFILE_PATH"             --report "$(Pipeline.Workspace)/s/api-repo/report.html"             --build-url "$(System.TeamFoundationCollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId)"
         displayName: 'Email Stress Test Report'
         condition: succeededOrFailed()
         env:

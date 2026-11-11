@@ -219,7 +219,7 @@ $env:SMTP_PASSWORD = Read-Host "SMTP password"
 python send-email.py --to you@example.com --report no-such-report.html --status PASSED --detail "SMTP test" --subject "SMTP test"
 ```
 
-You should see `Email report sent successfully!`. The email says that no report was produced, which is expected here. A send failure prints `Error sending email: ...` and does not fail a pipeline build.
+You should see `Email report sent successfully!`. The email lists the test details and says that no report is attached, which is expected here. A send failure prints `Error sending email: ...` and does not fail a pipeline build.
 
 ---
 
@@ -235,10 +235,10 @@ Run one smoke test that needs no credentials:
    |---|---|
    | Build | Green |
    | k6 step log | Ends with the summary and `k6 exit code: 0` |
-   | Email | Subject `[PASSED] Performance Test Report - Parallel-Batch-StressTest - Version 1.0.0`, with `report.html` attached |
+   | Email | Subject `Performance Test Report - Parallel-Batch-StressTest - Version 1.0.0`; body lists the API, date and time and the 2 endpoints; `report.html` attached; no result label |
    | Report | Opens in a browser, shows 2 endpoints, status `PASSED` |
 
-4. To verify the credential handling, run once with a profile that uses wrong credentials. Expected: build **red**, email `[FAILED]` with a `CREDENTIALS_REJECTED` reason, one request per endpoint.
+4. To verify the credential handling, run once with a profile that uses wrong credentials. Expected: build **red**, the report and build log show a `CREDENTIALS_REJECTED` reason, one request per endpoint (the email itself does not state the result).
 
 If something fails, use the troubleshooting table in [README.md](README.md), section 12.
 

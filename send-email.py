@@ -3,23 +3,107 @@ import sys
 import html
 import json
 import smtplib
+import re
 import argparse
+from datetime import datetime, timedelta, timezone
+from urllib.parse import urlsplit
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.base import MIMEBase
 from email import encoders
 
-def profile_labels(profile_path):
-    """apiName and artifact_version from the load profile, for the email subject (replaces the old jq call)."""
-    api_name, version = "Unknown-API", "N/A"
+def read_profile(profile_path):
+    """The load profile as a dict ({} when it is missing or unreadable; the email still goes out)."""
+    if not profile_path:
+        return {}
     try:
         with open(profile_path, encoding="utf-8") as f:
-            profile = json.load(f)
-        api_name = profile.get("apiName") or api_name
-        version = profile.get("artifact_version") or version
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
     except Exception as e:
-        print(f"[WARNING] Could not read apiName/artifact_version from {profile_path}: {e}", file=sys.stderr)
-    return api_name, version
+        print(f"[WARNING] Could not read the load profile {profile_path}: {e}", file=sys.stderr)
+        return {}
+
+def profile_labels(profile):
+    """apiName and artifact_version from the load profile, for the email subject."""
+    return profile.get("apiName") or "Unknown-API", profile.get("artifact_version") or "N/A"
+
+def duration_seconds(text):
+    """'10s' / '1m' / '1h30m' / '500ms' -> seconds (0 when it cannot be read)."""
+    units = {"ms": 0.001, "s": 1, "m": 60, "h": 3600}
+    total = 0.0
+    for number, unit in re.findall(r"(\d+(?:\.\d+)?)(ms|s|m|h)", str(text or "")):
+        total += float(number) * units[unit]
+    return total
+
+def format_duration(seconds):
+    seconds = int(round(seconds))
+    if seconds <= 0:
+        return ""
+    minutes, secs = divmod(seconds, 60)
+    hours, minutes = divmod(minutes, 60)
+    parts = [f"{hours} h" if hours else "", f"{minutes} min" if minutes else "", f"{secs} s" if secs else ""]
+    return " ".join(p for p in parts if p)
+
+def read_results(report_path):
+    """results.json written next to the report by the engine ({} when the test never produced one)."""
+    if not report_path:
+        return {}
+    path = os.path.join(os.path.dirname(report_path), "results.json")
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+def run_window(results):
+    """(start, duration in seconds) of the load test from results.json; (None, 0) when unknown."""
+    try:
+        end = datetime.fromisoformat(str(results["generatedAt"]).replace("Z", "+00:00"))
+        seconds = float((results.get("run") or {}).get("durationSec") or 0)
+        return end - timedelta(seconds=seconds), seconds
+    except Exception:
+        return None, 0
+
+def display_url(url):
+    """Scheme + host + path only: query strings and user info are dropped so a token in a URL never reaches an email."""
+    text = str(url or "")
+    try:
+        parts = urlsplit(text)
+        if parts.scheme and parts.netloc:
+            return f"{parts.scheme}://{parts.hostname or ''}{':' + str(parts.port) if parts.port else ''}{parts.path}"
+    except ValueError:
+        pass
+    return text.split("?")[0]
+
+METHOD_COLORS = {"GET": "#107c10", "POST": "#0078d4", "PUT": "#c27c0e", "PATCH": "#8764b8", "DELETE": "#d13438"}
+
+def endpoint_rows(profile):
+    """One <tr> per endpoint of the profile: number, method, name, URL (all HTML-escaped)."""
+    rows = []
+    for index, ep in enumerate(profile.get("endpoints") or [], start=1):
+        if not isinstance(ep, dict):
+            continue
+        method = str(ep.get("method") or "GET").upper()
+        url = display_url(ep.get("endpoint"))
+        name = str(ep.get("name") or "").strip() or (urlsplit(url).path or url)
+        color = METHOD_COLORS.get(method, "#605e5c")
+        rows.append(f"""
+                    <tr>
+                        <td style="padding:8px 10px; border-bottom:1px solid #edebe9; color:#605e5c;">{index}</td>
+                        <td style="padding:8px 10px; border-bottom:1px solid #edebe9;"><span style="background:{color}; color:#ffffff; font-size:11px; font-weight:bold; padding:2px 7px; border-radius:3px;">{html.escape(method)}</span></td>
+                        <td style="padding:8px 10px; border-bottom:1px solid #edebe9; font-weight:bold;">{html.escape(name)}</td>
+                        <td style="padding:8px 10px; border-bottom:1px solid #edebe9; font-family:Consolas,monospace; font-size:12px; color:#605e5c; word-break:break-all;">{html.escape(url)}</td>
+                    </tr>""")
+    return "".join(rows), len(rows)
+
+def peak_vus(profile):
+    targets = [s.get("target") for s in (profile.get("stages") or []) if isinstance(s, dict) and isinstance(s.get("target"), (int, float))]
+    return int(max(targets)) if targets else None
+
+def planned_seconds(profile):
+    return sum(duration_seconds(s.get("duration")) for s in (profile.get("stages") or []) if isinstance(s, dict))
 
 def split_addresses(value):
     """Comma or semicolon separated list -> list of addresses (empty entries dropped)."""
@@ -97,9 +181,11 @@ if __name__ == '__main__':
     parser.add_argument("--profile", default="", help="Path to the load profile JSON; supplies apiName and artifact_version for the subject")
     parser.add_argument("--report", required=True, help="Path to the HTML report to attach (report.html)")
     parser.add_argument("--build-url", default="", help="Link to the CI build (Jenkins BUILD_URL)")
-    parser.add_argument("--status", default="", help="Test result label: PASSED or FAILED (see ci/status.sh)")
-    parser.add_argument("--detail", default="", help="One-line explanation of the result, shown under the label")
-    
+    # The result (PASSED / FAILED / SLA MISSED) is deliberately NOT in the email: the email identifies the test, the attached report holds the outcome.
+    # --status / --detail are still accepted and ignored so that older pipeline files keep working.
+    parser.add_argument("--status", default="", help=argparse.SUPPRESS)
+    parser.add_argument("--detail", default="", help=argparse.SUPPRESS)
+
     args = parser.parse_args()
 
     # Load credentials from environment variables (Jenkins credentials / Azure DevOps variable group)
@@ -140,68 +226,84 @@ if __name__ == '__main__':
     if cc_emails:
         print(f"Cc: {cc_emails}")
 
-    base_subject = args.subject
-    if not base_subject:
-        api_name, version = profile_labels(args.profile) if args.profile else ("Unknown-API", "N/A")
-        base_subject = f"Performance Test Report - {api_name} - Version {version}"
-    subject = f"[{args.status}] {base_subject}" if args.status else base_subject
-    status_color = "#107c10" if args.status == "PASSED" else "#d13438"  # green for PASSED, red for FAILED
-    detail_html = f'<br><span style="font-size: 13px;">{html.escape(args.detail)}</span>' if args.detail else ""
-    status_row = f"""
-                    <tr>
-                        <td class="label">Result:</td>
-                        <td><b style="color: {status_color};">{html.escape(args.status)}</b>{detail_html}</td>
-                    </tr>""" if args.status else ""
+    profile = read_profile(args.profile)
+    api_name, version = profile_labels(profile)
+    subject = args.subject or f"Performance Test Report - {api_name} - Version {version}"
+
+    # Date and time of the test: from results.json (end time minus duration); without it (the test never produced one) the time of sending.
+    results = read_results(args.report)
+    started, run_seconds = run_window(results)
+    when = started or datetime.now(timezone.utc)
+    when_text = when.astimezone(timezone.utc).strftime("%d %b %Y, %H:%M:%S UTC")
+    duration_text = format_duration(run_seconds) or (format_duration(planned_seconds(profile)) + " (planned)" if planned_seconds(profile) else "")
+    vus = peak_vus(profile)
+    rows_html, endpoint_count = endpoint_rows(profile)
+    profile_file = os.path.basename(args.profile) if args.profile else ""
+    pipeline_name = os.environ.get('JOB_NAME') or os.environ.get('BUILD_DEFINITIONNAME', 'Performance-Stress-Test')
+    build_number = os.environ.get('BUILD_NUMBER') or os.environ.get('BUILD_BUILDID', 'N/A')
+
+    def detail_row(label, value, strong=False):
+        """One label/value row of the summary table; rows without a value are left out."""
+        if value in (None, ""):
+            return ""
+        weight = "font-weight:bold; font-size:15px;" if strong else ""
+        return f"""
+                <tr>
+                    <td style="padding:7px 12px; width:150px; color:#605e5c; border-bottom:1px solid #edebe9;">{html.escape(label)}</td>
+                    <td style="padding:7px 12px; color:#201f1e; border-bottom:1px solid #edebe9; {weight}">{value}</td>
+                </tr>"""
+
+    summary_rows = "".join([
+        detail_row("API tested", html.escape(str(api_name)), strong=True),
+        detail_row("Version", html.escape(str(version))),
+        detail_row("Date and time", html.escape(when_text)),
+        detail_row("Test duration", html.escape(duration_text)),
+        detail_row("Peak virtual users", html.escape(str(vus)) if vus is not None else ""),
+        detail_row("Number of endpoints", str(endpoint_count) if endpoint_count else ""),
+        detail_row("Load profile", html.escape(profile_file)),
+    ])
+    build_rows = "".join([
+        detail_row("Pipeline", html.escape(str(pipeline_name))),
+        detail_row("Build", html.escape(str(build_number))),
+        detail_row("Build link", f'<a href="{html.escape(args.build_url, quote=True)}" style="color:#0078d4;">View build</a>' if args.build_url else ""),
+    ])
+    endpoints_block = f"""
+            <h3 style="font-size:15px; margin:24px 0 8px 0; color:#201f1e;">Endpoints tested</h3>
+            <table cellpadding="0" cellspacing="0" style="width:100%; border-collapse:collapse; font-size:13px; border:1px solid #edebe9;">
+                <tr style="background:#f3f2f1; text-align:left;">
+                    <th style="padding:8px 10px; width:28px;">#</th>
+                    <th style="padding:8px 10px; width:70px;">Method</th>
+                    <th style="padding:8px 10px;">Endpoint</th>
+                    <th style="padding:8px 10px;">URL</th>
+                </tr>{rows_html}
+            </table>""" if rows_html else ""
 
     has_report = bool(args.report) and os.path.exists(args.report)
-    report_intro = ("The detailed <b>interactive HTML dashboard</b> is attached to this email." if has_report
-                    else "No report was produced because the test did not get as far as generating load.")
-    report_hint = ("Please download and open the attached <code>report.html</code> file in a web browser to analyze transaction response times, load stages, and SLA threshold violations."
-                   if has_report else "Check the build log for the reason.")
+    report_note = ("The detailed interactive report is attached as <b>report.html</b>. Download it and open it in a web browser to see the results: response times, load stages and SLA thresholds."
+                   if has_report else "No report is attached because the test did not get as far as generating load. The build log has the details.")
 
     html_content = f"""
     <html>
-    <head>
-        <style>
-            body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333333; }}
-            .container {{ padding: 20px; border: 1px solid #dddddd; border-radius: 5px; max-width: 600px; }}
-            .header {{ background-color: #0078d4; color: #ffffff; padding: 15px; border-radius: 5px 5px 0 0; margin: -20px -20px 20px -20px; }}
-            .header h2 {{ margin: 0; font-weight: 500; }}
-            .details {{ background-color: #f3f2f1; padding: 15px; border-radius: 4px; margin-bottom: 20px; }}
-            .details table {{ width: 100%; border-collapse: collapse; }}
-            .details td {{ padding: 5px 0; }}
-            .details td.label {{ font-weight: bold; width: 120px; }}
-            .footer {{ font-size: 12px; color: #8a8886; margin-top: 30px; border-top: 1px solid #eaeaea; padding-top: 10px; }}
-        </style>
-    </head>
-    <body>
-        <div class="container">
-            <div class="header">
-                <h2>Performance Test Report</h2>
+    <body style="margin:0; padding:0; font-family:Arial, Helvetica, sans-serif; color:#333333; line-height:1.5;">
+        <div style="max-width:680px; padding:20px; border:1px solid #dddddd; border-radius:5px;">
+            <div style="background-color:#0078d4; color:#ffffff; padding:16px 20px; border-radius:5px 5px 0 0; margin:-20px -20px 20px -20px;">
+                <div style="font-size:12px; letter-spacing:1px; text-transform:uppercase; opacity:0.85;">Performance Test Report</div>
+                <div style="font-size:20px; font-weight:bold; margin-top:2px;">{html.escape(str(api_name))}</div>
             </div>
-            <p>Hello,</p>
-            <p>The automated performance stress test execution has finished. {report_intro}</p>
-            
-            <div class="details">
-                <table>{status_row}
-                    <tr>
-                        <td class="label">Pipeline:</td>
-                        <td>{os.environ.get('JOB_NAME') or os.environ.get('BUILD_DEFINITIONNAME', 'Performance-Stress-Test')}</td>
-                    </tr>
-                    <tr>
-                        <td class="label">Build:</td>
-                        <td>{os.environ.get('BUILD_NUMBER') or os.environ.get('BUILD_BUILDID', 'N/A')}</td>
-                    </tr>
-                    <tr>
-                        <td class="label">Build Link:</td>
-                        <td><a href="{args.build_url}">View Build</a></td>
-                    </tr>
-                </table>
-            </div>
+            <p style="margin:0 0 16px 0;">Hello,<br>The automated performance test has finished. Here is what was tested.</p>
 
-            <p>{report_hint}</p>
-            
-            <div class="footer">
+            <h3 style="font-size:15px; margin:0 0 8px 0; color:#201f1e;">Test summary</h3>
+            <table cellpadding="0" cellspacing="0" style="width:100%; border-collapse:collapse; font-size:13px; border:1px solid #edebe9;">{summary_rows}
+            </table>
+            {endpoints_block}
+
+            <h3 style="font-size:15px; margin:24px 0 8px 0; color:#201f1e;">Pipeline run</h3>
+            <table cellpadding="0" cellspacing="0" style="width:100%; border-collapse:collapse; font-size:13px; border:1px solid #edebe9;">{build_rows}
+            </table>
+
+            <p style="margin:20px 0 0 0;">{report_note}</p>
+
+            <div style="font-size:12px; color:#8a8886; margin-top:28px; border-top:1px solid #eaeaea; padding-top:10px;">
                 This is an automated message sent by the Performance Pipeline Tooling.
             </div>
         </div>
