@@ -51,6 +51,7 @@ graph TD
 | `ci/status.sh` | both | The one rule that turns a k6 exit code into `PASSED` / `FAILED` and the one-line reason (build log and report; the email does not state the result). |
 | `report/` | both | `build_report.py` and `report-template.html`: the custom report. |
 | `send-email.py` | both | SMTP sender (test time, endpoint list and the report attached; no result label). |
+| `reference-profiles/` | Everyone | Worked examples of real profiles (not read by any pipeline). |
 | `templates/` | API teams | Starter files only (nothing runs from here): example profiles, `azure-pipelines.yml`, `azure-pipelines-api-repo.yml` and a `Jenkinsfile` (section 3). The pipeline you run is the root `azure-pipelines.yml`. |
 | `run-local.sh`, `run-local.ps1`, `local-run/` | developers | Run a profile on your own machine (not part of the CI flow). |
 
@@ -196,14 +197,14 @@ Starter files in `templates/`. Replace every `<...>` value before use:
 | File | Shows | Mirrors |
 |---|---|---|
 | `load-profile.json` | The minimum: stages and one endpoint (public `httpbin.org`, runs as it is) | - |
-| `load-profile-advanced.json` | Client ID authentication (`authType` + `authParameters` with `{{CLIENT_ID}}` / `{{CLIENT_SECRET}}`), stages, three latency thresholds, a GET and a PUT with a payload | `sample-api/AI_innovation_poc1/load-profile6-multi-put-update.json` (profiles 2-6 share this layout) |
+| `load-profile-advanced.json` | Client ID authentication (`authType` + `authParameters` with `{{CLIENT_ID}}` / `{{CLIENT_SECRET}}`), stages, three latency thresholds, a GET and a PUT with a payload | `reference-profiles/AI_innovation_poc1/load-profile6-multi-put-update.json` (profiles 2-6 share this layout) |
 | `load-profile-batch.json` | The same authentication, two GETs with the same `batchGroup`, called in parallel | `load-profile7-batch-get.json` |
 | `load-profile-smoke.json` | Credential-free parallel batch against `httpbin.org` (light load, 3 virtual users at most). Used for the install check, INSTALLATION-STEPS.md Part 5 | - |
 | `azure-pipelines.yml` | Template only, not used by any pipeline: a copy of the manual runner with `<...>` defaults for a team's own tooling repo. The pipeline you run is the root `azure-pipelines.yml` | root `azure-pipelines.yml` |
 | `azure-pipelines-api-repo.yml` | Optional, for a team that wants the pipeline inside its own API repo: calls the central job template from there ("imported mode"). The pipeline run from this repo is the root `azure-pipelines.yml` itself | - |
 | `Jenkinsfile` | Optional: the API repo's own Jenkins job that triggers the central job with the run parameters | parameters of the root `Jenkinsfile` |
 
-For OAuth or Basic, change the `authType` / `authParameters` block as in section 6 (`load-profile2.json` and `load-profile4.json` in `sample-api/`). The other templates carry no real host on purpose; `sample-api/` is the reference copy of the real profiles.
+For OAuth or Basic, change the `authType` / `authParameters` block as in section 6 (`load-profile2.json` and `load-profile4.json` in `reference-profiles/AI_innovation_poc1/`). The other templates carry no real host on purpose; `reference-profiles/` holds worked examples of the real profiles; the pipeline does not read it (it reads the repo given as `apiRepoUrl`).
 
 ---
 

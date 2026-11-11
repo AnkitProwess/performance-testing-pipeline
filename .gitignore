@@ -8,3 +8,5 @@ k6-dashboard.html
 run-local.ps1
 run-local.sh
 local-run/
+
+sample-api/

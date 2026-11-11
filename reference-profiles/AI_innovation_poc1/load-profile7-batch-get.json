@@ -1,0 +1,47 @@
+{
+    "apiName": "AI Innovation POC1 API",
+    "artifact_version": "1.0.105",
+    "authType": "CLIENT_ID_ENFORCEMENT",
+    "authParameters": {
+        "clientId": "{{CLIENT_ID}}",
+        "clientSecret": "{{CLIENT_SECRET}}"
+    },
+    "stages": [
+        {
+            "duration": "5s",
+            "target": 2
+        },
+        {
+            "duration": "10s",
+            "target": 3
+        },
+        {
+            "duration": "5s",
+            "target": 1
+        }
+    ],
+    "thresholds": {
+        "http_req_failed": [
+            "rate<0.005"
+        ],
+        "http_req_duration": [
+            "p(95)<3000"
+        ]
+    },
+    "endpoints": [
+        {
+            "endpoint": "https://ai-innovation-poc1-dbel0.y0lt3j.usa-e1.cloudhub.io/api/orders/ORD102",
+            "method": "GET",
+            "batchGroup": "orders-batch",
+            "expectedStatus": 200,
+            "sleepDuration": 0.5
+        },
+        {
+            "endpoint": "https://ai-innovation-poc1-dbel0.y0lt3j.usa-e1.cloudhub.io/api/orders/ORD113",
+            "method": "GET",
+            "batchGroup": "orders-batch",
+            "expectedStatus": 200,
+            "sleepDuration": 0.5
+        }
+    ]
+}

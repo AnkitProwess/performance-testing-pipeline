@@ -1,0 +1,39 @@
+{
+    "apiName": "Basic Auth Demo (httpbin)",
+    "artifact_version": "N/A",
+    "authType": "BASIC",
+    "authParameters": {
+        "username": "{{BASIC_USERNAME}}",
+        "password": "{{BASIC_PASSWORD}}"
+    },
+    "stages": [
+        {
+            "duration": "5s",
+            "target": 2
+        },
+        {
+            "duration": "10s",
+            "target": 3
+        },
+        {
+            "duration": "5s",
+            "target": 0
+        }
+    ],
+    "thresholds": {
+        "http_req_failed": [
+            "rate<0.05"
+        ],
+        "http_req_duration": [
+            "p(95)<3000"
+        ]
+    },
+    "endpoints": [
+        {
+            "endpoint": "https://httpbin.org/basic-auth/demo-user/demo-pass",
+            "method": "GET",
+            "expectedStatus": 200,
+            "sleepDuration": 1
+        }
+    ]
+}
