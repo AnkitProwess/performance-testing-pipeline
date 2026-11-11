@@ -25,7 +25,7 @@ graph TD
     E -->|"Writes"| F["results.json + k6-dashboard.html"]
     F -->|"4. report/build_report.py"| G["report.html (custom report)"]
     P -->|"5. Archives"| G
-    P -->|"6. send-email.py"| H["Email: test summary + endpoints + report attached"]
+    P -->|"6. send-email.py"| H["Email: test time + endpoints + report attached"]
     P -->|"7. ci/status.sh"| I["Build result from the k6 exit code"]
 ```
 
@@ -50,7 +50,7 @@ graph TD
 | `ci/run-k6.sh` | both | The one place that holds the `docker run` command and the list of credential variables passed to k6. |
 | `ci/status.sh` | both | The one rule that turns a k6 exit code into `PASSED` / `FAILED` and the one-line reason (build log and report; the email does not state the result). |
 | `report/` | both | `build_report.py` and `report-template.html`: the custom report. |
-| `send-email.py` | both | SMTP sender (test summary, endpoint list and the report attached; no result label). |
+| `send-email.py` | both | SMTP sender (test time, endpoint list and the report attached; no result label). |
 | `templates/` | API teams | Starter files: `Jenkinsfile`, `azure-pipelines.yml`, example profiles. |
 | `run-local.sh`, `run-local.ps1`, `local-run/` | developers | Run a profile on your own machine (not part of the CI flow). |
 
@@ -382,7 +382,7 @@ python report/build_report.py --results results.json --dashboard k6-dashboard.ht
 
 - **Subject:** `Performance Test Report - <apiName> - Version <artifact_version>`, with the values read from the profile. It carries no result label.
 - **Recipients:** `reportRecipient` plus `MANDATORY_RECIPIENTS` if defined (none by default), de-duplicated. `reportCc` goes into the Cc header.
-- **Body (no result, by design):** a *Test summary* table (API tested, version, date and time in UTC, test duration, peak virtual users, number of endpoints, load profile file), an *Endpoints tested* table (number, method coloured badge, endpoint name, URL without query string) and a *Pipeline run* table (pipeline, build number, link). Everything comes from the load profile (so it is complete even when the test failed) and from `results.json` next to the report (actual start time and duration; without it the send time and the planned duration from `stages` are shown). `report.html` is attached; if the test never generated load, no report is attached and the email says so. Endpoints use `name` when the profile gives one, else their URL path.
+- **Body (no result, by design):** the API name in the header, the *Test run* date and time (UTC), an *Endpoints tested* table (number, method coloured badge, endpoint name, URL without query string) and a *Pipeline run* table (pipeline, build number, link). Everything comes from the load profile (so it is complete even when the test failed) and from `results.json` next to the report (actual start time; without it the send time is shown). `report.html` is attached; if the test never generated load, no report is attached and the email says so. Endpoints use `name` when the profile gives one, else their URL path.
 - A delivery failure never hides the test result: Azure logs it and carries on, Jenkins marks the build UNSTABLE.
 
 Setup of the SMTP settings is in [INSTALLATION-STEPS.md](INSTALLATION-STEPS.md).

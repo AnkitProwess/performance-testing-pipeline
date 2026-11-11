@@ -3,7 +3,6 @@ import sys
 import html
 import json
 import smtplib
-import re
 import argparse
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlsplit
@@ -28,23 +27,6 @@ def profile_labels(profile):
     """apiName and artifact_version from the load profile, for the email subject."""
     return profile.get("apiName") or "Unknown-API", profile.get("artifact_version") or "N/A"
 
-def duration_seconds(text):
-    """'10s' / '1m' / '1h30m' / '500ms' -> seconds (0 when it cannot be read)."""
-    units = {"ms": 0.001, "s": 1, "m": 60, "h": 3600}
-    total = 0.0
-    for number, unit in re.findall(r"(\d+(?:\.\d+)?)(ms|s|m|h)", str(text or "")):
-        total += float(number) * units[unit]
-    return total
-
-def format_duration(seconds):
-    seconds = int(round(seconds))
-    if seconds <= 0:
-        return ""
-    minutes, secs = divmod(seconds, 60)
-    hours, minutes = divmod(minutes, 60)
-    parts = [f"{hours} h" if hours else "", f"{minutes} min" if minutes else "", f"{secs} s" if secs else ""]
-    return " ".join(p for p in parts if p)
-
 def read_results(report_path):
     """results.json written next to the report by the engine ({} when the test never produced one)."""
     if not report_path:
@@ -57,14 +39,13 @@ def read_results(report_path):
     except Exception:
         return {}
 
-def run_window(results):
-    """(start, duration in seconds) of the load test from results.json; (None, 0) when unknown."""
+def run_start(results):
+    """Start of the load test from results.json (end time minus duration); None when unknown."""
     try:
         end = datetime.fromisoformat(str(results["generatedAt"]).replace("Z", "+00:00"))
-        seconds = float((results.get("run") or {}).get("durationSec") or 0)
-        return end - timedelta(seconds=seconds), seconds
+        return end - timedelta(seconds=float((results.get("run") or {}).get("durationSec") or 0))
     except Exception:
-        return None, 0
+        return None
 
 def display_url(url):
     """Scheme + host + path only: query strings and user info are dropped so a token in a URL never reaches an email."""
@@ -98,12 +79,6 @@ def endpoint_rows(profile):
                     </tr>""")
     return "".join(rows), len(rows)
 
-def peak_vus(profile):
-    targets = [s.get("target") for s in (profile.get("stages") or []) if isinstance(s, dict) and isinstance(s.get("target"), (int, float))]
-    return int(max(targets)) if targets else None
-
-def planned_seconds(profile):
-    return sum(duration_seconds(s.get("duration")) for s in (profile.get("stages") or []) if isinstance(s, dict))
 
 def split_addresses(value):
     """Comma or semicolon separated list -> list of addresses (empty entries dropped)."""
@@ -232,13 +207,10 @@ if __name__ == '__main__':
 
     # Date and time of the test: from results.json (end time minus duration); without it (the test never produced one) the time of sending.
     results = read_results(args.report)
-    started, run_seconds = run_window(results)
+    started = run_start(results)
     when = started or datetime.now(timezone.utc)
     when_text = when.astimezone(timezone.utc).strftime("%d %b %Y, %H:%M:%S UTC")
-    duration_text = format_duration(run_seconds) or (format_duration(planned_seconds(profile)) + " (planned)" if planned_seconds(profile) else "")
-    vus = peak_vus(profile)
     rows_html, endpoint_count = endpoint_rows(profile)
-    profile_file = os.path.basename(args.profile) if args.profile else ""
     pipeline_name = os.environ.get('JOB_NAME') or os.environ.get('BUILD_DEFINITIONNAME', 'Performance-Stress-Test')
     build_number = os.environ.get('BUILD_NUMBER') or os.environ.get('BUILD_BUILDID', 'N/A')
 
@@ -253,15 +225,6 @@ if __name__ == '__main__':
                     <td style="padding:7px 12px; color:#201f1e; border-bottom:1px solid #edebe9; {weight}">{value}</td>
                 </tr>"""
 
-    summary_rows = "".join([
-        detail_row("API tested", html.escape(str(api_name)), strong=True),
-        detail_row("Version", html.escape(str(version))),
-        detail_row("Date and time", html.escape(when_text)),
-        detail_row("Test duration", html.escape(duration_text)),
-        detail_row("Peak virtual users", html.escape(str(vus)) if vus is not None else ""),
-        detail_row("Number of endpoints", str(endpoint_count) if endpoint_count else ""),
-        detail_row("Load profile", html.escape(profile_file)),
-    ])
     build_rows = "".join([
         detail_row("Pipeline", html.escape(str(pipeline_name))),
         detail_row("Build", html.escape(str(build_number))),
@@ -290,11 +253,10 @@ if __name__ == '__main__':
                 <div style="font-size:12px; letter-spacing:1px; text-transform:uppercase; opacity:0.85;">Performance Test Report</div>
                 <div style="font-size:20px; font-weight:bold; margin-top:2px;">{html.escape(str(api_name))}</div>
             </div>
-            <p style="margin:0 0 16px 0;">Hello,<br>The automated performance test has finished. Here is what was tested.</p>
+            <p style="margin:0 0 16px 0;">Hello,<br>The automated performance test has finished.</p>
 
-            <h3 style="font-size:15px; margin:0 0 8px 0; color:#201f1e;">Test summary</h3>
-            <table cellpadding="0" cellspacing="0" style="width:100%; border-collapse:collapse; font-size:13px; border:1px solid #edebe9;">{summary_rows}
-            </table>
+            <p style="margin:0 0 4px 0; font-size:13px; color:#605e5c;">Test run</p>
+            <p style="margin:0; font-size:16px; font-weight:bold; color:#201f1e;">{html.escape(when_text)}</p>
             {endpoints_block}
 
             <h3 style="font-size:15px; margin:24px 0 8px 0; color:#201f1e;">Pipeline run</h3>
